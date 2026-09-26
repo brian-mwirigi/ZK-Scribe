@@ -13,5 +13,6 @@ export { pauseHistogram } from "./pop/histogram.ts";
 export { endorseStatement, authorEndorsementValid } from "./author/endorse.ts";
 export { buildLedger } from "./ledger/combine.ts";
 export { parseDiffStat } from "./git/diffstat.ts";
+export { lintPolicy } from "./cva/lint.ts";
 export { synthesizeSession } from "./pop/synthesize.ts";
 export { toJats, toProvenanceManifest } from "./manifest/export.ts";

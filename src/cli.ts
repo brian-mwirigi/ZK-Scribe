@@ -7,6 +7,7 @@ import { applyTextDelta, eventFromKey, type KeyInfo } from "./capture/keys.ts";
 import { CREDIT_ROLES } from "./credit/taxonomy.ts";
 import { suggestRole } from "./credit/suggest.ts";
 import { defaultPolicy, type Policy } from "./cva/policy.ts";
+import { lintPolicy } from "./cva/lint.ts";
 import { detectContext, type ExecutionContext } from "./git/context.ts";
 import { parseDiffStat, reviewNote } from "./git/diffstat.ts";
 import { hashTree, ignoredTreePath, type TreeFile } from "./hash/tree.ts";
@@ -44,6 +45,7 @@ Usage:
   zk-scribe histogram --session session.json
   zk-scribe ledger <attestation.json>...
   zk-scribe diffstat <changes.diff> [--content-hash hex]
+  zk-scribe policy
   zk-scribe credit
 `;
 
@@ -68,6 +70,7 @@ function main(argv: string[]): void {
   if (command === "histogram") return histogramCommand(flags);
   if (command === "ledger") return ledgerCommand(flags, positionals);
   if (command === "diffstat") return diffstatCommand(flags, positionals);
+  if (command === "policy") return policyCommand(flags);
   if (command === "credit") return credit();
   throw new Error(`Unknown command "${command}".\n\n${HELP}`);
 }
@@ -200,6 +203,12 @@ function exportCommand(flags: Flags, positionals: string[]): void {
     return;
   }
   throw new Error("Pass --format c2pa, jats, or summary.");
+}
+
+function policyCommand(flags: Flags): void {
+  const lint = lintPolicy(loadPolicy(projectDir(flags), flags.policy));
+  process.stdout.write(`${JSON.stringify(lint, null, 2)}\n`);
+  if (!lint.ok) process.exitCode = 1;
 }
 
 function diffstatCommand(flags: Flags, positionals: string[]): void {
