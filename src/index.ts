@@ -5,5 +5,6 @@ export { CREDIT_ROLES, getRole } from "./credit/taxonomy.ts";
 export { defaultPolicy } from "./cva/policy.ts";
 export { extract } from "./pop/extract.ts";
 export { explainFeatures } from "./pop/explain.ts";
+export { doctorReport } from "./doctor.ts";
 export { synthesizeSession } from "./pop/synthesize.ts";
 export { toJats, toProvenanceManifest } from "./manifest/export.ts";

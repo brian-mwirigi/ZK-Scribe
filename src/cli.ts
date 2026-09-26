@@ -7,6 +7,7 @@ import { applyTextDelta, eventFromKey, type KeyInfo } from "./capture/keys.ts";
 import { CREDIT_ROLES } from "./credit/taxonomy.ts";
 import { defaultPolicy, type Policy } from "./cva/policy.ts";
 import { detectContext, type ExecutionContext } from "./git/context.ts";
+import { doctorReport } from "./doctor.ts";
 import { decodeSecretKey, encodeKey, generateAgentKey } from "./keys.ts";
 import { toJats, toProvenanceManifest } from "./manifest/export.ts";
 import { attest, audit, verify, type Attestation, type Witness } from "./pop/attest.ts";
@@ -30,6 +31,7 @@ Usage:
   zk-scribe audit --attestation attestation.json --session session.json --witness attestation.witness.json
   zk-scribe export <attestation.json> --format c2pa|jats [--out file]
   zk-scribe explain --session session.json
+  zk-scribe doctor [--dir .]
   zk-scribe credit
 `;
 
@@ -47,6 +49,7 @@ function main(argv: string[]): void {
   if (command === "audit") return auditCommand(flags);
   if (command === "export") return exportCommand(flags, positionals);
   if (command === "explain") return explainCommand(flags);
+  if (command === "doctor") return doctorCommand(flags);
   if (command === "credit") return credit();
   throw new Error(`Unknown command "${command}".\n\n${HELP}`);
 }
@@ -163,6 +166,21 @@ function exportCommand(flags: Flags, positionals: string[]): void {
     return;
   }
   throw new Error("Pass --format c2pa or --format jats.");
+}
+
+function doctorCommand(flags: Flags): void {
+  const dir = projectDir(flags);
+  const root = path.join(dir, ".zk-scribe");
+  const major = Number(process.versions.node.split(".")[0]);
+  const report = doctorReport({
+    nodeMajor: major,
+    minimumMajor: 22,
+    policyExists: fs.existsSync(path.join(root, "policy.json")),
+    publicKeyExists: fs.existsSync(path.join(root, "agent.public.json")),
+    seedExists: fs.existsSync(path.join(root, "private", "agent.seed")),
+  });
+  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  if (!report.ok) process.exitCode = 1;
 }
 
 function explainCommand(flags: Flags): void {
