@@ -16,6 +16,7 @@ import { toSummary } from "./manifest/summary.ts";
 import { attest, audit, verify, type Attestation, type Witness } from "./pop/attest.ts";
 import { extract } from "./pop/extract.ts";
 import { explainFeatures } from "./pop/explain.ts";
+import { pauseHistogram } from "./pop/histogram.ts";
 import type { SessionLog } from "./pop/session.ts";
 import { synthesizeSession } from "./pop/synthesize.ts";
 import { VERSION } from "./version.ts";
@@ -38,6 +39,7 @@ Usage:
   zk-scribe hash <file-or-directory>
   zk-scribe suggest <file>
   zk-scribe summary <attestation.json>
+  zk-scribe histogram --session session.json
   zk-scribe credit
 `;
 
@@ -59,6 +61,7 @@ function main(argv: string[]): void {
   if (command === "hash") return hashCommand(flags, positionals);
   if (command === "suggest") return suggestCommand(flags, positionals);
   if (command === "summary") return summaryCommand(flags, positionals);
+  if (command === "histogram") return histogramCommand(flags);
   if (command === "credit") return credit();
   throw new Error(`Unknown command "${command}".\n\n${HELP}`);
 }
@@ -184,6 +187,11 @@ function exportCommand(flags: Flags, positionals: string[]): void {
     return;
   }
   throw new Error("Pass --format c2pa, jats, or summary.");
+}
+
+function histogramCommand(flags: Flags): void {
+  const session = readJson<SessionLog>(resolveIn(projectDir(flags), required(flags, "session")));
+  process.stdout.write(`${JSON.stringify(pauseHistogram(session.events), null, 2)}\n`);
 }
 
 function summaryCommand(flags: Flags, positionals: string[]): void {
