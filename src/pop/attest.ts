@@ -5,6 +5,7 @@ import { commit, hexToPoint, hexToScalar, pointToHex, randomScalar, scalarToHex 
 import { proveInterval, verifyInterval, type IntervalProof } from "../crypto/range.ts";
 import { Transcript } from "../crypto/transcript.ts";
 import { assertActionAllowed, policyHash, type Policy } from "../cva/policy.ts";
+import { isRevoked } from "../cva/revocation.ts";
 import type { ExecutionContext } from "../git/context.ts";
 import {
   decodePublicKey,
@@ -97,6 +98,7 @@ export type VerifyOptions = {
   expectedPolicy?: Policy;
   require?: "process" | "process-proven";
   requireAuthor?: boolean;
+  revokedKeys?: readonly string[];
 };
 
 export type VerifyResult = {
@@ -269,6 +271,7 @@ export function verify(attestation: Attestation, options: VerifyOptions): Verify
     const presented = encodeKey(decodePublicKey(attestation.cva.agentPublicKey));
     identityTrusted = trusted === presented;
     if (!identityTrusted) reasons.push("Agent key does not match the trusted key.");
+    if (isRevoked(presented, options.revokedKeys ?? [])) reasons.push("Agent key is revoked.");
 
     if (!options.expectedPolicy) {
       reasons.push("No expected policy was provided.");

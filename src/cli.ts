@@ -21,6 +21,7 @@ import { attest, audit, verify, type Attestation, type Witness } from "./pop/att
 import { extract } from "./pop/extract.ts";
 import { explainFeatures } from "./pop/explain.ts";
 import { pauseHistogram } from "./pop/histogram.ts";
+import { parseRevocationList } from "./cva/revocation.ts";
 import { defaultConfig, parseConfig, type ProjectConfig } from "./config.ts";
 import { sessionStats } from "./pop/stats.ts";
 import type { SessionLog } from "./pop/session.ts";
@@ -38,6 +39,7 @@ Usage:
   zk-scribe record --out session.json
   zk-scribe attest --file manuscript.md [--role <credit-role>] [--session session.json] [--assert "claim"] [--author-seed author.seed] [--out attestation.json]
   zk-scribe verify <attestation.json> [--require process|process-proven] [--require-author] [--agent-key hex] [--policy policy.json]
+  A .zk-scribe/revoked.json list, when present, refuses those agent keys.
   zk-scribe audit --attestation attestation.json --session session.json --witness attestation.witness.json
   zk-scribe export <attestation.json> --format c2pa|jats|summary|html [--out file]
   zk-scribe explain --session session.json
@@ -171,9 +173,16 @@ function verifyCommand(flags: Flags, positionals: string[]): void {
     expectedPolicy: loadPolicy(project, flags.policy),
     require: requireFlag,
     requireAuthor: flags["require-author"] === true,
+    revokedKeys: loadRevokedKeys(project),
   });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   if (!result.ok) process.exitCode = 1;
+}
+
+function loadRevokedKeys(dir: string): string[] | undefined {
+  const file = path.join(dir, ".zk-scribe", "revoked.json");
+  if (!fs.existsSync(file)) return undefined;
+  return parseRevocationList(JSON.parse(fs.readFileSync(file, "utf8")) as unknown);
 }
 
 function auditCommand(flags: Flags): void {
