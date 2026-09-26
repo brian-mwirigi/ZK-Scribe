@@ -30,8 +30,8 @@ Usage:
   zk-scribe init [--dir .] [--force]
   zk-scribe example --kind composition|transcription|automated|paste --out session.json
   zk-scribe record --out session.json
-  zk-scribe attest --file manuscript.md --role <credit-role> [--session session.json] [--assert "claim"] [--out attestation.json]
-  zk-scribe verify <attestation.json> [--require process|process-proven] [--agent-key hex] [--policy policy.json]
+  zk-scribe attest --file manuscript.md --role <credit-role> [--session session.json] [--assert "claim"] [--author-seed author.seed] [--out attestation.json]
+  zk-scribe verify <attestation.json> [--require process|process-proven] [--require-author] [--agent-key hex] [--policy policy.json]
   zk-scribe audit --attestation attestation.json --session session.json --witness attestation.witness.json
   zk-scribe export <attestation.json> --format c2pa|jats|summary [--out file]
   zk-scribe explain --session session.json
@@ -115,6 +115,7 @@ function attestCommand(flags: Flags): void {
     agentSecretKey: secret,
     session,
     assertion,
+    authorSecretKey: authorSeed(dir, flags["author-seed"]),
   });
   writeJson(out, attestation);
   if (witness) writeJson(witnessPathFor(out), witness);
@@ -123,6 +124,11 @@ function attestCommand(flags: Flags): void {
   process.stdout.write(`Wrote ${out}\n`);
   if (witness) process.stdout.write(`Wrote ${witnessPathFor(out)} (keep this local)\n`);
   if (binding === "unsupported") process.exitCode = 1;
+}
+
+function authorSeed(dir: string, value: string | boolean | undefined): Uint8Array | undefined {
+  if (typeof value !== "string") return undefined;
+  return decodeSecretKey(fs.readFileSync(resolveIn(dir, value), "utf8").trim());
 }
 
 function verifyCommand(flags: Flags, positionals: string[]): void {
@@ -139,6 +145,7 @@ function verifyCommand(flags: Flags, positionals: string[]): void {
     trustedAgentKey: loadTrustedKey(project, flags["agent-key"]),
     expectedPolicy: loadPolicy(project, flags.policy),
     require: requireFlag,
+    requireAuthor: flags["require-author"] === true,
   });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   if (!result.ok) process.exitCode = 1;
