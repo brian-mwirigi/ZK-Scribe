@@ -17,6 +17,7 @@ export { lintPolicy } from "./cva/lint.ts";
 export { toHtmlReport } from "./manifest/html.ts";
 export { sessionStats } from "./pop/stats.ts";
 export { localProfile } from "./pop/profile.ts";
+export { bundleId } from "./pop/bundle-id.ts";
 export { defaultConfig, parseConfig } from "./config.ts";
 export { isRevoked, parseRevocationList } from "./cva/revocation.ts";
 export { synthesizeSession } from "./pop/synthesize.ts";
