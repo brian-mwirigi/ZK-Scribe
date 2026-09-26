@@ -11,7 +11,7 @@
     "zk-scribe": "./bin/zk-scribe.js"
   },
   "scripts": {
-    "test": "node --experimental-strip-types --test test/crypto.test.ts test/pop.test.ts",
+    "test": "node scripts/run-tests.mjs",
     "typecheck": "tsc --noEmit",
     "zk-scribe": "node --experimental-strip-types src/cli.ts"
   },
