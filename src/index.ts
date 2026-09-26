@@ -4,5 +4,6 @@ export type { Attestation, VerifyResult, Witness } from "./pop/attest.ts";
 export { CREDIT_ROLES, getRole } from "./credit/taxonomy.ts";
 export { defaultPolicy } from "./cva/policy.ts";
 export { extract } from "./pop/extract.ts";
+export { explainFeatures } from "./pop/explain.ts";
 export { synthesizeSession } from "./pop/synthesize.ts";
 export { toJats, toProvenanceManifest } from "./manifest/export.ts";
