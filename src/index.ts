@@ -16,5 +16,6 @@ export { parseDiffStat } from "./git/diffstat.ts";
 export { lintPolicy } from "./cva/lint.ts";
 export { toHtmlReport } from "./manifest/html.ts";
 export { sessionStats } from "./pop/stats.ts";
+export { defaultConfig, parseConfig } from "./config.ts";
 export { synthesizeSession } from "./pop/synthesize.ts";
 export { toJats, toProvenanceManifest } from "./manifest/export.ts";
