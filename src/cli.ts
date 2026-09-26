@@ -12,6 +12,7 @@ import { hashTree, ignoredTreePath, type TreeFile } from "./hash/tree.ts";
 import { doctorReport } from "./doctor.ts";
 import { decodeSecretKey, encodeKey, generateAgentKey } from "./keys.ts";
 import { toJats, toProvenanceManifest } from "./manifest/export.ts";
+import { toSummary } from "./manifest/summary.ts";
 import { attest, audit, verify, type Attestation, type Witness } from "./pop/attest.ts";
 import { extract } from "./pop/extract.ts";
 import { explainFeatures } from "./pop/explain.ts";
@@ -31,11 +32,12 @@ Usage:
   zk-scribe attest --file manuscript.md --role <credit-role> [--session session.json] [--assert "claim"] [--out attestation.json]
   zk-scribe verify <attestation.json> [--require process|process-proven] [--agent-key hex] [--policy policy.json]
   zk-scribe audit --attestation attestation.json --session session.json --witness attestation.witness.json
-  zk-scribe export <attestation.json> --format c2pa|jats [--out file]
+  zk-scribe export <attestation.json> --format c2pa|jats|summary [--out file]
   zk-scribe explain --session session.json
   zk-scribe doctor [--dir .]
   zk-scribe hash <file-or-directory>
   zk-scribe suggest <file>
+  zk-scribe summary <attestation.json>
   zk-scribe credit
 `;
 
@@ -56,6 +58,7 @@ function main(argv: string[]): void {
   if (command === "doctor") return doctorCommand(flags);
   if (command === "hash") return hashCommand(flags, positionals);
   if (command === "suggest") return suggestCommand(flags, positionals);
+  if (command === "summary") return summaryCommand(flags, positionals);
   if (command === "credit") return credit();
   throw new Error(`Unknown command "${command}".\n\n${HELP}`);
 }
@@ -171,7 +174,23 @@ function exportCommand(flags: Flags, positionals: string[]): void {
     process.stdout.write(`Wrote ${out}\n`);
     return;
   }
-  throw new Error("Pass --format c2pa or --format jats.");
+  if (format === "summary") {
+    if (!policy.allow.includes("export.manifest") || policy.deny.includes("export.manifest")) {
+      throw new Error("Policy does not allow export.manifest.");
+    }
+    const out = String(flags.out ?? "summary.json");
+    writeJson(out, toSummary(attestation));
+    process.stdout.write(`Wrote ${out}\n`);
+    return;
+  }
+  throw new Error("Pass --format c2pa, jats, or summary.");
+}
+
+function summaryCommand(flags: Flags, positionals: string[]): void {
+  const target = positionals[0];
+  if (!target) throw new Error("Pass an attestation file to summarize.");
+  const attestation = readJson<Attestation>(resolveIn(projectDir(flags), target));
+  process.stdout.write(`${JSON.stringify(toSummary(attestation), null, 2)}\n`);
 }
 
 function suggestCommand(flags: Flags, positionals: string[]): void {
