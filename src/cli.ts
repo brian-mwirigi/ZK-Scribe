@@ -14,6 +14,7 @@ import { hashTree, ignoredTreePath, type TreeFile } from "./hash/tree.ts";
 import { doctorReport } from "./doctor.ts";
 import { decodeSecretKey, encodeKey, generateAgentKey } from "./keys.ts";
 import { toJats, toProvenanceManifest } from "./manifest/export.ts";
+import { toHtmlReport } from "./manifest/html.ts";
 import { toSummary } from "./manifest/summary.ts";
 import { buildLedger } from "./ledger/combine.ts";
 import { attest, audit, verify, type Attestation, type Witness } from "./pop/attest.ts";
@@ -36,7 +37,7 @@ Usage:
   zk-scribe attest --file manuscript.md --role <credit-role> [--session session.json] [--assert "claim"] [--author-seed author.seed] [--out attestation.json]
   zk-scribe verify <attestation.json> [--require process|process-proven] [--require-author] [--agent-key hex] [--policy policy.json]
   zk-scribe audit --attestation attestation.json --session session.json --witness attestation.witness.json
-  zk-scribe export <attestation.json> --format c2pa|jats|summary [--out file]
+  zk-scribe export <attestation.json> --format c2pa|jats|summary|html [--out file]
   zk-scribe explain --session session.json
   zk-scribe doctor [--dir .]
   zk-scribe hash <file-or-directory>
@@ -202,7 +203,16 @@ function exportCommand(flags: Flags, positionals: string[]): void {
     process.stdout.write(`Wrote ${out}\n`);
     return;
   }
-  throw new Error("Pass --format c2pa, jats, or summary.");
+  if (format === "html") {
+    if (!policy.allow.includes("export.manifest") || policy.deny.includes("export.manifest")) {
+      throw new Error("Policy does not allow export.manifest.");
+    }
+    const out = String(flags.out ?? "attestation.html");
+    fs.writeFileSync(out, toHtmlReport(attestation));
+    process.stdout.write(`Wrote ${out}\n`);
+    return;
+  }
+  throw new Error("Pass --format c2pa, jats, summary, or html.");
 }
 
 function policyCommand(flags: Flags): void {
