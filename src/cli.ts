@@ -13,6 +13,7 @@ import { doctorReport } from "./doctor.ts";
 import { decodeSecretKey, encodeKey, generateAgentKey } from "./keys.ts";
 import { toJats, toProvenanceManifest } from "./manifest/export.ts";
 import { toSummary } from "./manifest/summary.ts";
+import { buildLedger } from "./ledger/combine.ts";
 import { attest, audit, verify, type Attestation, type Witness } from "./pop/attest.ts";
 import { extract } from "./pop/extract.ts";
 import { explainFeatures } from "./pop/explain.ts";
@@ -40,6 +41,7 @@ Usage:
   zk-scribe suggest <file>
   zk-scribe summary <attestation.json>
   zk-scribe histogram --session session.json
+  zk-scribe ledger <attestation.json>...
   zk-scribe credit
 `;
 
@@ -62,6 +64,7 @@ function main(argv: string[]): void {
   if (command === "suggest") return suggestCommand(flags, positionals);
   if (command === "summary") return summaryCommand(flags, positionals);
   if (command === "histogram") return histogramCommand(flags);
+  if (command === "ledger") return ledgerCommand(flags, positionals);
   if (command === "credit") return credit();
   throw new Error(`Unknown command "${command}".\n\n${HELP}`);
 }
@@ -194,6 +197,16 @@ function exportCommand(flags: Flags, positionals: string[]): void {
     return;
   }
   throw new Error("Pass --format c2pa, jats, or summary.");
+}
+
+function ledgerCommand(flags: Flags, positionals: string[]): void {
+  if (positionals.length === 0) throw new Error("Pass one or more attestation files.");
+  const dir = projectDir(flags);
+  const entries = positionals.map((file) => toSummary(readJson<Attestation>(resolveIn(dir, file))));
+  const out = flags.out === undefined ? "" : String(flags.out);
+  const ledger = buildLedger(entries);
+  if (out) writeJson(resolveIn(dir, out), ledger);
+  else process.stdout.write(`${JSON.stringify(ledger, null, 2)}\n`);
 }
 
 function histogramCommand(flags: Flags): void {
