@@ -9,5 +9,6 @@ export { doctorReport } from "./doctor.ts";
 export { hashTree } from "./hash/tree.ts";
 export { suggestRole } from "./credit/suggest.ts";
 export { toSummary } from "./manifest/summary.ts";
+export { pauseHistogram } from "./pop/histogram.ts";
 export { synthesizeSession } from "./pop/synthesize.ts";
 export { toJats, toProvenanceManifest } from "./manifest/export.ts";
