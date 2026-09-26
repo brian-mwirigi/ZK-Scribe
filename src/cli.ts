@@ -7,6 +7,7 @@ import { applyTextDelta, eventFromKey, type KeyInfo } from "./capture/keys.ts";
 import { CREDIT_ROLES } from "./credit/taxonomy.ts";
 import { defaultPolicy, type Policy } from "./cva/policy.ts";
 import { detectContext, type ExecutionContext } from "./git/context.ts";
+import { hashTree, ignoredTreePath, type TreeFile } from "./hash/tree.ts";
 import { doctorReport } from "./doctor.ts";
 import { decodeSecretKey, encodeKey, generateAgentKey } from "./keys.ts";
 import { toJats, toProvenanceManifest } from "./manifest/export.ts";
@@ -32,6 +33,7 @@ Usage:
   zk-scribe export <attestation.json> --format c2pa|jats [--out file]
   zk-scribe explain --session session.json
   zk-scribe doctor [--dir .]
+  zk-scribe hash <file-or-directory>
   zk-scribe credit
 `;
 
@@ -50,6 +52,7 @@ function main(argv: string[]): void {
   if (command === "export") return exportCommand(flags, positionals);
   if (command === "explain") return explainCommand(flags);
   if (command === "doctor") return doctorCommand(flags);
+  if (command === "hash") return hashCommand(flags, positionals);
   if (command === "credit") return credit();
   throw new Error(`Unknown command "${command}".\n\n${HELP}`);
 }
@@ -166,6 +169,33 @@ function exportCommand(flags: Flags, positionals: string[]): void {
     return;
   }
   throw new Error("Pass --format c2pa or --format jats.");
+}
+
+function hashCommand(flags: Flags, positionals: string[]): void {
+  const target = positionals[0];
+  if (!target) throw new Error("Pass a file or directory to hash.");
+  const full = resolveIn(projectDir(flags), target);
+  if (!fs.existsSync(full)) throw new Error(`Nothing found at ${full}.`);
+  const stat = fs.statSync(full);
+  const files: TreeFile[] = stat.isDirectory()
+    ? collectTree(full)
+    : [{ path: path.basename(full), bytes: fs.readFileSync(full) }];
+  process.stdout.write(`${hashTree(files)}\n`);
+}
+
+function collectTree(root: string): TreeFile[] {
+  const files: TreeFile[] = [];
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      const relative = path.relative(root, full);
+      if (ignoredTreePath(relative)) continue;
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile()) files.push({ path: relative, bytes: fs.readFileSync(full) });
+    }
+  };
+  walk(root);
+  return files;
 }
 
 function doctorCommand(flags: Flags): void {
