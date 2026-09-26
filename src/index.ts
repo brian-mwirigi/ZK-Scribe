@@ -21,5 +21,8 @@ export { bundleId } from "./pop/bundle-id.ts";
 export { rangeBenchmark } from "./crypto/benchmark.ts";
 export { defaultConfig, parseConfig } from "./config.ts";
 export { isRevoked, parseRevocationList } from "./cva/revocation.ts";
+export { issueGrant, hashGrant, parseGrant } from "./cva/grant.ts";
+export { govern } from "./cva/govern.ts";
+export { appendJournal, auditJournal } from "./cva/journal.ts";
 export { synthesizeSession } from "./pop/synthesize.ts";
 export { toJats, toProvenanceManifest } from "./manifest/export.ts";

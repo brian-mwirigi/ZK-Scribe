@@ -7,13 +7,16 @@ import { rangeBenchmark } from "./crypto/benchmark.ts";
 import { applyTextDelta, eventFromKey, type KeyInfo } from "./capture/keys.ts";
 import { CREDIT_ROLES } from "./credit/taxonomy.ts";
 import { suggestRole } from "./credit/suggest.ts";
-import { defaultPolicy, type Policy } from "./cva/policy.ts";
+import { defaultPolicy, policyHash, type Policy } from "./cva/policy.ts";
 import { lintPolicy } from "./cva/lint.ts";
+import { govern } from "./cva/govern.ts";
+import { issueGrant, parseGrant, type AgentGrant } from "./cva/grant.ts";
+import { appendJournal, auditJournal, parseJournalEntry, type JournalEntry } from "./cva/journal.ts";
 import { detectContext, type ExecutionContext } from "./git/context.ts";
 import { parseDiffStat, reviewNote } from "./git/diffstat.ts";
 import { hashTree, ignoredTreePath, type TreeFile } from "./hash/tree.ts";
 import { doctorReport } from "./doctor.ts";
-import { decodeSecretKey, encodeKey, generateAgentKey } from "./keys.ts";
+import { decodeSecretKey, encodeKey, generateAgentKey, publicKeyFromSecret } from "./keys.ts";
 import { toJats, toProvenanceManifest } from "./manifest/export.ts";
 import { toHtmlReport } from "./manifest/html.ts";
 import { toSummary } from "./manifest/summary.ts";
@@ -40,9 +43,10 @@ Usage:
   zk-scribe init [--dir .] [--force]
   zk-scribe example --kind composition|transcription|automated|paste --out session.json
   zk-scribe record --out session.json
-  zk-scribe attest --file manuscript.md [--role <credit-role>] [--session session.json] [--assert "claim"] [--author-seed author.seed] [--out attestation.json]
-  zk-scribe verify <attestation.json> [--require process|process-proven] [--require-author] [--agent-key hex] [--policy policy.json]
+  zk-scribe attest --file manuscript.md [--role <credit-role>] [--session session.json] [--assert "claim"] [--author-seed author.seed] [--grant grant.json] [--out attestation.json]
+  zk-scribe verify <attestation.json> [--require process|process-proven] [--require-author] [--require-grant] [--grant grant.json] [--agent-key hex] [--policy policy.json]
   A .zk-scribe/revoked.json list, when present, refuses those agent keys.
+  A .zk-scribe/grant.json file, when present, scopes attest and export to that grant.
   zk-scribe audit --attestation attestation.json --session session.json --witness attestation.witness.json
   zk-scribe export <attestation.json> --format c2pa|jats|summary|html [--out file]
   zk-scribe explain --session session.json
@@ -54,6 +58,9 @@ Usage:
   zk-scribe ledger <attestation.json>...
   zk-scribe diffstat <changes.diff> [--content-hash hex]
   zk-scribe policy
+  zk-scribe grant --file manuscript.md --actions attest.process,export.manifest --author-seed author.seed [--out .zk-scribe/grant.json]
+  zk-scribe govern --action attest.process --file manuscript.md [--grant grant.json]
+  zk-scribe journal
   zk-scribe stats --session session.json
   zk-scribe profile --session session.json
   zk-scribe id <attestation.json>
@@ -83,6 +90,9 @@ function main(argv: string[]): void {
   if (command === "ledger") return ledgerCommand(flags, positionals);
   if (command === "diffstat") return diffstatCommand(flags, positionals);
   if (command === "policy") return policyCommand(flags);
+  if (command === "grant") return grantCommand(flags);
+  if (command === "govern") return governCommand(flags);
+  if (command === "journal") return journalCommand(flags);
   if (command === "stats") return statsCommand(flags);
   if (command === "profile") return profileCommand(flags);
   if (command === "id") return idCommand(flags, positionals);
@@ -136,6 +146,7 @@ function attestCommand(flags: Flags): void {
   const assertion = flags.assert === undefined ? undefined : String(flags.assert);
   const session = flags.session ? readJson<SessionLog>(resolveIn(dir, String(flags.session))) : undefined;
   const context = contextFrom(flags, dir, file);
+  const grantHash = applyGovernance(dir, flags, policy, assertedAction(flags), contentHash);
   const { attestation, witness } = attest({
     role,
     contentHash,
@@ -145,6 +156,7 @@ function attestCommand(flags: Flags): void {
     session,
     assertion,
     authorSecretKey: authorSeed(dir, flags["author-seed"]),
+    grantHash,
   });
   writeJson(out, attestation);
   if (witness) writeJson(witnessPathFor(out), witness);
@@ -182,7 +194,9 @@ function verifyCommand(flags: Flags, positionals: string[]): void {
     expectedPolicy: loadPolicy(project, flags.policy),
     require: requireFlag,
     requireAuthor: flags["require-author"] === true,
+    requireGrant: flags["require-grant"] === true,
     revokedKeys: loadRevokedKeys(project),
+    grant: typeof flags.grant === "string" ? parseGrant(readJson(resolveIn(project, flags.grant))) : undefined,
   });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   if (!result.ok) process.exitCode = 1;
@@ -207,8 +221,12 @@ function exportCommand(flags: Flags, positionals: string[]): void {
   const file = positionals[0] ?? "";
   if (!file) throw new Error("Pass the attestation file to export.");
   const format = String(flags.format ?? "");
+  const dir = projectDir(flags);
   const attestation = readJson<Attestation>(file);
-  const policy = loadPolicy(projectDir(flags), flags.policy);
+  const policy = loadPolicy(dir, flags.policy);
+  if (format === "c2pa" || format === "summary" || format === "html" || format === "jats") {
+    applyGovernance(dir, flags, policy, format === "jats" ? "export.jats" : "export.manifest", attestation.statement.contentHash);
+  }
   if (format === "c2pa") {
     if (!policy.allow.includes("export.manifest") || policy.deny.includes("export.manifest")) {
       throw new Error("Policy does not allow export.manifest.");
@@ -273,6 +291,111 @@ function policyCommand(flags: Flags): void {
   const lint = lintPolicy(loadPolicy(projectDir(flags), flags.policy));
   process.stdout.write(`${JSON.stringify(lint, null, 2)}\n`);
   if (!lint.ok) process.exitCode = 1;
+}
+
+function grantCommand(flags: Flags): void {
+  const dir = projectDir(flags);
+  const author = authorSeed(dir, flags["author-seed"]);
+  if (!author) throw new Error("Pass --author-seed for the grant signer.");
+  const actions = String(flags.actions ?? "")
+    .split(",")
+    .map((action) => action.trim())
+    .filter((action) => action.length > 0);
+  const grant = issueGrant({
+    agentPublicKey: loadTrustedKey(dir, flags["agent-key"]),
+    policy: loadPolicy(dir, flags.policy),
+    actions,
+    contentHash: sha256Hex(fs.readFileSync(resolveIn(dir, required(flags, "file")))),
+    authorSecretKey: author,
+  });
+  const out = resolveIn(dir, String(flags.out ?? path.join(".zk-scribe", "grant.json")));
+  writeJson(out, grant);
+  process.stdout.write(`Wrote ${out}\n`);
+}
+
+function governCommand(flags: Flags): void {
+  const dir = projectDir(flags);
+  const policy = loadPolicy(dir, flags.policy);
+  const contentHash = sha256Hex(fs.readFileSync(resolveIn(dir, required(flags, "file"))));
+  const decision = decideAndRecord(dir, flags, policy, required(flags, "action"), contentHash);
+  process.stdout.write(`${JSON.stringify(decision, null, 2)}\n`);
+  if (!decision.allow) process.exitCode = 1;
+}
+
+function journalCommand(flags: Flags): void {
+  const result = auditJournal(readJournal(projectDir(flags)));
+  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  if (!result.ok) process.exitCode = 1;
+}
+
+function assertedAction(flags: Flags): "attest.assert" | "attest.process" {
+  return typeof flags.assert === "string" && flags.assert.trim() !== "" ? "attest.assert" : "attest.process";
+}
+
+function applyGovernance(
+  dir: string,
+  flags: Flags,
+  policy: Policy,
+  action: string,
+  contentHash: string,
+): string | undefined {
+  if (!readGovernedGrant(dir, flags)) return undefined;
+  const decision = decideAndRecord(dir, flags, policy, action, contentHash);
+  if (!decision.allow) throw new Error(decision.reasons.join(" "));
+  return decision.grantHash;
+}
+
+function decideAndRecord(dir: string, flags: Flags, policy: Policy, action: string, contentHash: string) {
+  const secret = loadSecret(dir);
+  const agentPublicKey = encodeKey(publicKeyFromSecret(secret));
+  const decision = govern({
+    action,
+    agentPublicKey,
+    policy,
+    contentHash,
+    revokedKeys: loadRevokedKeys(dir),
+    grant: readGovernedGrant(dir, flags),
+  });
+  const next = appendJournal(readJournal(dir), {
+    action,
+    agentPublicKey,
+    contentHash,
+    policyHash: policyHash(policy),
+    grantHash: decision.grantHash ?? null,
+    allow: decision.allow,
+    reasons: decision.reasons,
+    agentSecretKey: secret,
+  });
+  writeJournal(dir, next);
+  return decision;
+}
+
+function readGovernedGrant(dir: string, flags: Flags): AgentGrant | undefined {
+  if (typeof flags.grant === "string") return parseGrant(readJson(resolveIn(dir, flags.grant)));
+  const fallback = path.join(dir, ".zk-scribe", "grant.json");
+  if (!fs.existsSync(fallback)) return undefined;
+  return parseGrant(readJson(fallback));
+}
+
+function journalFile(dir: string): string {
+  return path.join(dir, ".zk-scribe", "private", "journal.jsonl");
+}
+
+function readJournal(dir: string): JournalEntry[] {
+  const file = journalFile(dir);
+  if (!fs.existsSync(file)) return [];
+  return fs
+    .readFileSync(file, "utf8")
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== "")
+    .map((line) => parseJournalEntry(JSON.parse(line) as unknown));
+}
+
+function writeJournal(dir: string, entries: JournalEntry[]): void {
+  const file = journalFile(dir);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const body = entries.map((entry) => JSON.stringify(entry)).join("\n");
+  fs.writeFileSync(file, body.length === 0 ? "" : `${body}\n`);
 }
 
 function diffstatCommand(flags: Flags, positionals: string[]): void {

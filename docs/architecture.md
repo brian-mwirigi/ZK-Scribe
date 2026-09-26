@@ -57,6 +57,10 @@ Every attestation carries a CVA payload: the agent public key, the action (`atte
 
 The default policy allows timing capture, process attestation, signed assertions, and manifest export. It denies export of raw events, plaintext, and witnesses.
 
+An author key can issue a grant for one agent, one policy hash, one manuscript hash, and a list of actions. `attest` and `export` honor `.zk-scribe/grant.json` when that file is present, and the agent signature covers the grant hash. A publisher checks the grant file with `verify --grant`. `--require-grant` rejects an attestation that carries no grant hash.
+
+Each governed decision is appended to `.zk-scribe/private/journal.jsonl`. The file stays local. Every entry is signed by the agent key and linked to the hash of the previous entry. `journal` checks that chain. The holder of the agent seed can still append a new entry. The chain shows an edit to an earlier entry, and an entry that was not signed by the recorded key.
+
 This is the transparent form of the authorization relation: the publisher sees the action and the policy. A later zero-knowledge authorization proof would hide policy detail the publisher does not need. It would still have to bind the same four elements: agent, request, execution context, and policy.
 
 ## Manifests

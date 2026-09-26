@@ -4,6 +4,7 @@ import { getRole, type CreditRoleId, type Feasibility } from "../credit/taxonomy
 import { commit, hexToPoint, hexToScalar, pointToHex, randomScalar, scalarToHex } from "../crypto/group.ts";
 import { proveInterval, verifyInterval, type IntervalProof } from "../crypto/range.ts";
 import { Transcript } from "../crypto/transcript.ts";
+import { grantCovers, hashGrant, type AgentGrant } from "../cva/grant.ts";
 import { assertActionAllowed, policyHash, type Policy } from "../cva/policy.ts";
 import { isRevoked } from "../cva/revocation.ts";
 import type { ExecutionContext } from "../git/context.ts";
@@ -73,6 +74,7 @@ export type Attestation = {
     signature: string;
   };
   author?: AuthorEndorsement;
+  grantHash?: string;
 };
 
 export type Witness = {
@@ -91,6 +93,7 @@ export type AttestInput = {
   session?: SessionLog;
   assertion?: string;
   authorSecretKey?: Uint8Array;
+  grantHash?: string;
 };
 
 export type VerifyOptions = {
@@ -98,7 +101,9 @@ export type VerifyOptions = {
   expectedPolicy?: Policy;
   require?: "process" | "process-proven";
   requireAuthor?: boolean;
+  requireGrant?: boolean;
   revokedKeys?: readonly string[];
+  grant?: AgentGrant;
 };
 
 export type VerifyResult = {
@@ -217,6 +222,10 @@ export function attest(input: AttestInput): { attestation: Attestation; witness:
   const agentPublicKey = encodeKey(publicKeyFromSecret(input.agentSecretKey));
   const statementHash = canonicalHash(statement);
   const author = input.authorSecretKey ? endorseStatement(statementHash, input.authorSecretKey) : undefined;
+  const grantHash = input.grantHash;
+  if (grantHash !== undefined && !/^[0-9a-f]{64}$/.test(grantHash)) {
+    throw new Error("grantHash must be a sha256 hex digest.");
+  }
   const payload = signedPayload({
     action,
     agentPublicKey,
@@ -225,6 +234,7 @@ export function attest(input: AttestInput): { attestation: Attestation; witness:
     commitments,
     rangeProofs,
     author,
+    grantHash,
   });
   const attestation: Attestation = {
     version: "zk-scribe/0.1.0",
@@ -238,6 +248,7 @@ export function attest(input: AttestInput): { attestation: Attestation; witness:
       signature: encodeKey(sign(utf8(payload), input.agentSecretKey)),
     },
     ...(author ? { author } : {}),
+    ...(grantHash ? { grantHash } : {}),
   };
   const witness: Witness | null = extraction
     ? {
@@ -293,6 +304,7 @@ export function verify(attestation: Attestation, options: VerifyOptions): Verify
       commitments: attestation.commitments,
       rangeProofs: attestation.rangeProofs,
       author: attestation.author,
+      grantHash: attestation.grantHash,
     });
     signatureValid = verifySignature(
       decodeSignature(attestation.cva.signature),
@@ -304,6 +316,19 @@ export function verify(attestation: Attestation, options: VerifyOptions): Verify
       reasons.push("Author endorsement does not match the statement.");
     }
     if (options.requireAuthor && !attestation.author) reasons.push("Author endorsement is required.");
+    if (options.requireGrant && !attestation.grantHash) reasons.push("A grant binding is required.");
+    if (options.grant) {
+      if (attestation.grantHash !== hashGrant(options.grant)) reasons.push("Grant does not match the attestation.");
+      else {
+        const cover = grantCovers(options.grant, {
+          action: attestation.cva.action,
+          agentPublicKey: attestation.cva.agentPublicKey,
+          policyHash: embeddedHash,
+          contentHash: attestation.statement.contentHash,
+        });
+        if (!cover.ok) reasons.push(...cover.reasons);
+      }
+    }
 
     proofsValid = checkProofs(attestation, reasons);
     checkBinding(attestation, reasons);
@@ -476,6 +501,7 @@ function signedPayload(body: {
   commitments: Attestation["commitments"];
   rangeProofs: Attestation["rangeProofs"];
   author?: AuthorEndorsement;
+  grantHash?: string;
 }): string {
   const payload: Record<string, unknown> = {
     action: body.action,
@@ -486,6 +512,7 @@ function signedPayload(body: {
     statementHash: body.statementHash,
   };
   if (body.author) payload.author = body.author;
+  if (body.grantHash) payload.grantHash = body.grantHash;
   return canonicalHash(payload);
 }
 

@@ -63,9 +63,9 @@ npm run zk-scribe -- export attestation.json --format jats
 
 ## Commands
 
-`explain`, `doctor`, `hash`, `suggest`, `summary`, `histogram`, `ledger`, `diffstat`, `policy`, `stats`, `profile`, `id`, and `benchmark` sit beside `attest` and `verify`. Running `zk-scribe` with no arguments prints the full list.
+`explain`, `doctor`, `hash`, `suggest`, `summary`, `histogram`, `ledger`, `diffstat`, `policy`, `grant`, `govern`, `journal`, `stats`, `profile`, `id`, and `benchmark` sit beside `attest` and `verify`. Running `zk-scribe` with no arguments prints the full list.
 
-`stats` and `profile` read a local session and print counts or pause percentiles. They do not write an attestation. `id` prints a bundle id from the statement hash and the agent key. `benchmark` times one small range proof. `verify` refuses a key listed in `.zk-scribe/revoked.json` when that file exists.
+`stats` and `profile` read a local session and print counts or pause percentiles. They do not write an attestation. `id` prints a bundle id from the statement hash and the agent key. `benchmark` times one small range proof. `verify` refuses a key listed in `.zk-scribe/revoked.json` when that file exists. `grant` lets an author key scope the agent to one manuscript and a list of actions. When `.zk-scribe/grant.json` is present, `attest` and `export` refuse anything outside that grant, and the attestation signature covers the grant hash. `govern` records the decision in `.zk-scribe/private/journal.jsonl`. `journal` checks that signed chain.
 
 ## Roles
 
