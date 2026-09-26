@@ -10,6 +10,8 @@ import { detectContext, type ExecutionContext } from "./git/context.ts";
 import { decodeSecretKey, encodeKey, generateAgentKey } from "./keys.ts";
 import { toJats, toProvenanceManifest } from "./manifest/export.ts";
 import { attest, audit, verify, type Attestation, type Witness } from "./pop/attest.ts";
+import { extract } from "./pop/extract.ts";
+import { explainFeatures } from "./pop/explain.ts";
 import type { SessionLog } from "./pop/session.ts";
 import { synthesizeSession } from "./pop/synthesize.ts";
 import { VERSION } from "./version.ts";
@@ -27,6 +29,7 @@ Usage:
   zk-scribe verify <attestation.json> [--require process|process-proven] [--agent-key hex] [--policy policy.json]
   zk-scribe audit --attestation attestation.json --session session.json --witness attestation.witness.json
   zk-scribe export <attestation.json> --format c2pa|jats [--out file]
+  zk-scribe explain --session session.json
   zk-scribe credit
 `;
 
@@ -43,6 +46,7 @@ function main(argv: string[]): void {
   if (command === "verify") return verifyCommand(flags, positionals);
   if (command === "audit") return auditCommand(flags);
   if (command === "export") return exportCommand(flags, positionals);
+  if (command === "explain") return explainCommand(flags);
   if (command === "credit") return credit();
   throw new Error(`Unknown command "${command}".\n\n${HELP}`);
 }
@@ -159,6 +163,19 @@ function exportCommand(flags: Flags, positionals: string[]): void {
     return;
   }
   throw new Error("Pass --format c2pa or --format jats.");
+}
+
+function explainCommand(flags: Flags): void {
+  const session = readJson<SessionLog>(resolveIn(projectDir(flags), required(flags, "session")));
+  const extraction = extract(session);
+  const explanation = explainFeatures(extraction.features, extraction.bulkInsertEvents);
+  process.stdout.write(`${JSON.stringify({
+    label: explanation.label,
+    note: explanation.note,
+    durationMs: extraction.durationMs,
+    insertChars: extraction.insertChars,
+    checks: explanation.checks,
+  }, null, 2)}\n`);
 }
 
 function credit(): void {
