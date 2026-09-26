@@ -1,0 +1,12 @@
+{
+  "sessionId": "example-paste",
+  "startedAt": "2026-09-26T12:00:00.000Z",
+  "events": [
+    {
+      "t": 0,
+      "op": "paste",
+      "len": 480,
+      "boundary": false
+    }
+  ]
+}

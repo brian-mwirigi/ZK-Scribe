@@ -1,0 +1,21 @@
+# Copy this workflow into a manuscript repository that already has:
+#   attestation.json
+#   .zk-scribe/agent.public.json
+#   .zk-scribe/policy.json
+# Install ZK-Scribe in that repository, or replace the run step with the
+# path you use to reach this verifier. Do not commit the agent seed or
+# any *.witness.json file.
+name: Verify ZK-Scribe attestation
+on:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: node --experimental-strip-types src/cli.ts verify attestation.json --require process-proven

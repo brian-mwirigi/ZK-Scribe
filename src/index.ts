@@ -1,0 +1,8 @@
+export { VERSION } from "./version.ts";
+export { attest, audit, verify } from "./pop/attest.ts";
+export type { Attestation, VerifyResult, Witness } from "./pop/attest.ts";
+export { CREDIT_ROLES, getRole } from "./credit/taxonomy.ts";
+export { defaultPolicy } from "./cva/policy.ts";
+export { extract } from "./pop/extract.ts";
+export { synthesizeSession } from "./pop/synthesize.ts";
+export { toJats, toProvenanceManifest } from "./manifest/export.ts";

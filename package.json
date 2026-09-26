@@ -1,0 +1,28 @@
+{
+  "name": "zk-scribe",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cryptographic authorship and contribution attestation for academic writing.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "zk-scribe": "./bin/zk-scribe.js"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/crypto.test.ts test/pop.test.ts",
+    "typecheck": "tsc --noEmit",
+    "zk-scribe": "node --experimental-strip-types src/cli.ts"
+  },
+  "dependencies": {
+    "@noble/curves": "^2.4.0",
+    "@noble/ed25519": "^3.2.0",
+    "@noble/hashes": "^2.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.0",
+    "typescript": "^5.9.3"
+  },
+  "license": "UNLICENSED"
+}

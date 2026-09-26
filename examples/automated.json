@@ -1,0 +1,966 @@
+{
+  "sessionId": "example-automated",
+  "startedAt": "2026-09-26T12:00:00.000Z",
+  "events": [
+    {
+      "t": 0,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 15,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 30,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 45,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 60,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 75,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 90,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 105,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 120,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 135,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 150,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 165,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 180,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 195,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 210,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 225,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 240,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 255,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 270,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 285,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 300,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 315,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 330,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 345,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 360,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 375,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 390,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 405,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 420,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 435,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 450,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 465,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 480,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 495,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 510,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 525,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 540,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 555,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 570,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 585,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 600,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 615,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 630,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 645,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 660,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 675,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 690,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 705,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 720,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 735,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 750,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 765,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 780,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 795,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 810,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 825,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 840,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 855,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 870,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 885,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 900,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 915,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 930,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 945,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 960,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 975,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 990,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1005,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1020,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1035,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1050,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1065,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1080,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1095,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1110,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1125,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1140,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1155,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1170,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1185,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1200,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1215,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1230,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1245,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1260,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1275,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1290,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1305,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1320,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1335,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1350,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1365,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1380,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1395,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1410,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1425,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1440,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1455,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1470,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1485,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1500,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1515,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1530,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1545,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1560,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1575,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1590,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1605,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1620,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1635,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1650,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1665,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1680,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1695,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1710,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1725,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1740,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1755,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1770,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1785,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1800,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1815,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1830,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1845,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1860,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1875,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1890,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1905,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1920,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1935,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1950,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1965,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1980,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 1995,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2010,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2025,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2040,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2055,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2070,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2085,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2100,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2115,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2130,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2145,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2160,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2175,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2190,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2205,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2220,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2235,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2250,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2265,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2280,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2295,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2310,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2325,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2340,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2355,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2370,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    },
+    {
+      "t": 2385,
+      "op": "insert",
+      "len": 1,
+      "boundary": false
+    }
+  ]
+}

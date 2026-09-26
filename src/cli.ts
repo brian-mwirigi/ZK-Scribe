@@ -1,0 +1,309 @@
+#!/usr/bin/env node
+import fs from "node:fs";
+import path from "node:path";
+import readline from "node:readline";
+import { sha256Hex, utf8 } from "./canon.ts";
+import { applyTextDelta, eventFromKey, type KeyInfo } from "./capture/keys.ts";
+import { CREDIT_ROLES } from "./credit/taxonomy.ts";
+import { defaultPolicy, type Policy } from "./cva/policy.ts";
+import { detectContext, type ExecutionContext } from "./git/context.ts";
+import { decodeSecretKey, encodeKey, generateAgentKey } from "./keys.ts";
+import { toJats, toProvenanceManifest } from "./manifest/export.ts";
+import { attest, audit, verify, type Attestation, type Witness } from "./pop/attest.ts";
+import type { SessionLog } from "./pop/session.ts";
+import { synthesizeSession } from "./pop/synthesize.ts";
+import { VERSION } from "./version.ts";
+
+type Flags = Record<string, string | boolean>;
+
+const HELP = `ZK-Scribe ${VERSION}
+Cryptographic authorship and contribution attestation.
+
+Usage:
+  zk-scribe init [--dir .] [--force]
+  zk-scribe example --kind composition|transcription|automated|paste --out session.json
+  zk-scribe record --out session.json
+  zk-scribe attest --file manuscript.md --role <credit-role> [--session session.json] [--assert "claim"] [--out attestation.json]
+  zk-scribe verify <attestation.json> [--require process|process-proven] [--agent-key hex] [--policy policy.json]
+  zk-scribe audit --attestation attestation.json --session session.json --witness attestation.witness.json
+  zk-scribe export <attestation.json> --format c2pa|jats [--out file]
+  zk-scribe credit
+`;
+
+function main(argv: string[]): void {
+  const { command, flags, positionals } = parseArgs(argv);
+  if (!command || flags.help === true || command === "help") {
+    process.stdout.write(HELP);
+    return;
+  }
+  if (command === "init") return init(String(flags.dir ?? "."), flags.force === true);
+  if (command === "example") return example(flags);
+  if (command === "record") return void record(String(flags.out ?? "session.json")).catch(fail);
+  if (command === "attest") return attestCommand(flags);
+  if (command === "verify") return verifyCommand(flags, positionals);
+  if (command === "audit") return auditCommand(flags);
+  if (command === "export") return exportCommand(flags, positionals);
+  if (command === "credit") return credit();
+  throw new Error(`Unknown command "${command}".\n\n${HELP}`);
+}
+
+function init(dir: string, force: boolean): void {
+  const root = path.join(dir, ".zk-scribe");
+  const seedPath = path.join(root, "private", "agent.seed");
+  fs.mkdirSync(path.dirname(seedPath), { recursive: true });
+  if (fs.existsSync(seedPath) && !force) {
+    throw new Error("An agent seed already exists. Pass --force to replace it.");
+  }
+  const key = generateAgentKey();
+  fs.writeFileSync(seedPath, `${encodeKey(key.secretKey)}\n`);
+  fs.writeFileSync(
+    path.join(root, "agent.public.json"),
+    `${JSON.stringify({ version: "zk-scribe-agent/0.1.0", algorithm: "ed25519", publicKey: encodeKey(key.publicKey) }, null, 2)}\n`,
+  );
+  fs.writeFileSync(path.join(root, "policy.json"), `${JSON.stringify(defaultPolicy(), null, 2)}\n`);
+  process.stdout.write(`Initialized ${root}\n`);
+  process.stdout.write("The seed in .zk-scribe/private/ stays local. Commit agent.public.json and policy.json.\n");
+}
+
+function example(flags: Flags): void {
+  const kind = String(flags.kind ?? "");
+  if (kind !== "composition" && kind !== "transcription" && kind !== "automated" && kind !== "paste") {
+    throw new Error("Pass --kind composition|transcription|automated|paste.");
+  }
+  const out = String(flags.out ?? "");
+  if (!out) throw new Error("Pass --out for the session log.");
+  fs.mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
+  fs.writeFileSync(out, `${JSON.stringify(synthesizeSession(kind), null, 2)}\n`);
+  process.stdout.write(`Wrote ${out}\n`);
+}
+
+function attestCommand(flags: Flags): void {
+  const dir = projectDir(flags);
+  const file = resolveIn(dir, required(flags, "file"));
+  const role = required(flags, "role");
+  const out = resolveIn(dir, String(flags.out ?? "attestation.json"));
+  const policy = loadPolicy(dir, flags.policy);
+  const secret = loadSecret(dir);
+  const contentHash = sha256Hex(fs.readFileSync(file));
+  const assertion = flags.assert === undefined ? undefined : String(flags.assert);
+  const session = flags.session ? readJson<SessionLog>(resolveIn(dir, String(flags.session))) : undefined;
+  const context = contextFrom(flags, dir, file);
+  const { attestation, witness } = attest({
+    role,
+    contentHash,
+    context,
+    policy,
+    agentSecretKey: secret,
+    session,
+    assertion,
+  });
+  writeJson(out, attestation);
+  if (witness) writeJson(witnessPathFor(out), witness);
+  const binding = attestation.statement.role.binding;
+  process.stdout.write(`${binding}: ${attestation.statement.role.detail}\n`);
+  process.stdout.write(`Wrote ${out}\n`);
+  if (witness) process.stdout.write(`Wrote ${witnessPathFor(out)} (keep this local)\n`);
+  if (binding === "unsupported") process.exitCode = 1;
+}
+
+function verifyCommand(flags: Flags, positionals: string[]): void {
+  const project = projectDir(flags);
+  const raw = positionals[0] ?? (flags.attestation === undefined ? "" : String(flags.attestation));
+  if (!raw) throw new Error("Pass the attestation file to verify.");
+  const file = resolveIn(project, raw);
+  const attestation = readJson<Attestation>(file);
+  const requireFlag = flags.require === undefined ? undefined : String(flags.require);
+  if (requireFlag !== undefined && requireFlag !== "process" && requireFlag !== "process-proven") {
+    throw new Error("--require must be process or process-proven.");
+  }
+  const result = verify(attestation, {
+    trustedAgentKey: loadTrustedKey(project, flags["agent-key"]),
+    expectedPolicy: loadPolicy(project, flags.policy),
+    require: requireFlag,
+  });
+  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  if (!result.ok) process.exitCode = 1;
+}
+
+function auditCommand(flags: Flags): void {
+  const attestation = readJson<Attestation>(required(flags, "attestation"));
+  const session = readJson<SessionLog>(required(flags, "session"));
+  const witness = readJson<Witness>(required(flags, "witness"));
+  const result = audit(attestation, session, witness);
+  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  if (!result.ok) process.exitCode = 1;
+}
+
+function exportCommand(flags: Flags, positionals: string[]): void {
+  const file = positionals[0] ?? "";
+  if (!file) throw new Error("Pass the attestation file to export.");
+  const format = String(flags.format ?? "");
+  const attestation = readJson<Attestation>(file);
+  const policy = loadPolicy(projectDir(flags), flags.policy);
+  if (format === "c2pa") {
+    if (!policy.allow.includes("export.manifest") || policy.deny.includes("export.manifest")) {
+      throw new Error("Policy does not allow export.manifest.");
+    }
+    const out = String(flags.out ?? "manifest.c2pa.json");
+    writeJson(out, toProvenanceManifest(attestation));
+    process.stdout.write(`Wrote ${out}\n`);
+    return;
+  }
+  if (format === "jats") {
+    if (!policy.allow.includes("export.jats") || policy.deny.includes("export.jats")) {
+      throw new Error("Policy does not allow export.jats.");
+    }
+    const out = String(flags.out ?? "attestation.jats.xml");
+    fs.writeFileSync(out, toJats(attestation));
+    process.stdout.write(`Wrote ${out}\n`);
+    return;
+  }
+  throw new Error("Pass --format c2pa or --format jats.");
+}
+
+function credit(): void {
+  for (const role of CREDIT_ROLES) {
+    process.stdout.write(`${role.feasibility.padEnd(12)} ${role.id.padEnd(28)} ${role.observes}\n`);
+  }
+}
+
+function record(out: string): Promise<void> {
+  if (!process.stdin.isTTY || typeof process.stdin.setRawMode !== "function") {
+    return Promise.reject(new Error("record needs an interactive terminal."));
+  }
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin });
+    readline.emitKeypressEvents(process.stdin, rl);
+    process.stdin.setRawMode(true);
+    const started = Date.now();
+    const events: SessionLog["events"] = [];
+    let text = "";
+    const cleanup = () => {
+      process.stdin.setRawMode(false);
+      process.stdin.off("keypress", onKey);
+      rl.close();
+    };
+    const onKey = (str: string, key: KeyInfo) => {
+      const step = eventFromKey({ ...key, sequence: key.sequence || str }, Date.now() - started);
+      if (step.kind === "abort") {
+        cleanup();
+        process.stdout.write("\nDiscarded. Nothing was written.\n");
+        process.exitCode = 1;
+        resolve();
+        return;
+      }
+      if (step.kind === "finish") {
+        cleanup();
+        const session: SessionLog = {
+          sessionId: `rec-${started.toString(16)}`,
+          startedAt: new Date(started).toISOString(),
+          events,
+        };
+        writeJson(out, session);
+        process.stdout.write(`\nSaved ${events.length} timing events to ${out}\n`);
+        process.stdout.write(`Local buffer hash ${sha256Hex(utf8(text))} (the text was not written)\n`);
+        resolve();
+        return;
+      }
+      if (step.kind === "event") {
+        text = applyTextDelta(text, step.event, step.textDelta);
+        events.push(step.event);
+        if (step.event.op === "delete") process.stdout.write("\b \b");
+        else if (step.textDelta) process.stdout.write(step.textDelta);
+      }
+    };
+    process.stdin.on("keypress", onKey);
+    process.stdout.write("Timing keystrokes. Typed text stays on screen and is not saved.\nCtrl+D writes the timing log. Ctrl+C discards it.\n");
+  });
+}
+
+function projectDir(flags: Flags): string {
+  return path.resolve(typeof flags.dir === "string" ? flags.dir : process.cwd());
+}
+
+function resolveIn(dir: string, file: string): string {
+  return path.resolve(dir, file);
+}
+
+function contextFrom(flags: Flags, cwd: string, file: string): ExecutionContext {
+  const detected = detectContext(cwd, path.resolve(file));
+  const requested = flags.environment === undefined ? undefined : String(flags.environment);
+  if (requested === undefined) return detected;
+  if (requested !== "git" && requested !== "overleaf-git" && requested !== "local") {
+    throw new Error("--environment must be git, overleaf-git, or local.");
+  }
+  return { ...detected, environment: requested };
+}
+
+function loadPolicy(cwd: string, override: string | boolean | undefined): Policy {
+  const file = typeof override === "string" ? override : path.join(cwd, ".zk-scribe", "policy.json");
+  if (!fs.existsSync(file)) throw new Error(`Policy not found at ${file}. Run zk-scribe init.`);
+  return readJson<Policy>(file);
+}
+
+function loadSecret(cwd: string): Uint8Array {
+  const file = path.join(cwd, ".zk-scribe", "private", "agent.seed");
+  if (!fs.existsSync(file)) throw new Error(`Agent seed not found at ${file}. Run zk-scribe init.`);
+  return decodeSecretKey(fs.readFileSync(file, "utf8").trim());
+}
+
+function loadTrustedKey(cwd: string, override: string | boolean | undefined): string {
+  if (typeof override === "string") return override;
+  const file = path.join(cwd, ".zk-scribe", "agent.public.json");
+  if (!fs.existsSync(file)) throw new Error(`Trusted agent key not found at ${file}. Pass --agent-key.`);
+  const parsed = readJson<{ publicKey: string }>(file);
+  if (!parsed.publicKey) throw new Error("agent.public.json is missing publicKey.");
+  return parsed.publicKey;
+}
+
+function witnessPathFor(out: string): string {
+  return out.endsWith(".json") ? `${out.slice(0, -5)}.witness.json` : `${out}.witness.json`;
+}
+
+function required(flags: Flags, name: string): string {
+  const value = flags[name];
+  if (typeof value !== "string" || value.trim() === "") throw new Error(`Pass --${name}.`);
+  return value;
+}
+
+function readJson<T>(file: string): T {
+  return JSON.parse(fs.readFileSync(file, "utf8")) as T;
+}
+
+function writeJson(file: string, value: unknown): void {
+  fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function parseArgs(argv: string[]): { command: string; flags: Flags; positionals: string[] } {
+  const [command = "", ...rest] = argv;
+  const flags: Flags = {};
+  const positionals: string[] = [];
+  for (let index = 0; index < rest.length; index += 1) {
+    const token = rest[index];
+    if (!token.startsWith("--")) {
+      positionals.push(token);
+      continue;
+    }
+    const key = token.slice(2);
+    const next = rest[index + 1];
+    if (next === undefined || next.startsWith("--")) flags[key] = true;
+    else {
+      flags[key] = next;
+      index += 1;
+    }
+  }
+  return { command, flags, positionals };
+}
+
+function fail(error: unknown): never {
+  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+  process.exit(1);
+}
+
+try {
+  main(process.argv.slice(2));
+} catch (error) {
+  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = 2;
+}
