@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { bundleId } from "../src/pop/bundle-id.ts";
 import { PROOF_SYSTEM, type Attestation } from "../src/pop/attest.ts";
 import { defaultPolicy } from "../src/cva/policy.ts";
@@ -42,3 +47,17 @@ test("bundle id follows the statement and the agent key", () => {
   assert.notEqual(bundleId(sample("bb".repeat(32))), first);
   assert.match(first, /^[0-9a-f]{64}$/);
 });
+
+test("id command prints the bundle id", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "zk-scribe-id-"));
+  const attestation = sample("aa".repeat(32));
+  fs.writeFileSync(path.join(dir, "attestation.json"), `${JSON.stringify(attestation)}\n`);
+  const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
+  const result = spawnSync(process.execPath, ["--experimental-strip-types", cli, "id", "attestation.json", "--dir", dir], {
+    cwd: dir,
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), bundleId(attestation));
+});
+
