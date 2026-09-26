@@ -7,5 +7,6 @@ export { extract } from "./pop/extract.ts";
 export { explainFeatures } from "./pop/explain.ts";
 export { doctorReport } from "./doctor.ts";
 export { hashTree } from "./hash/tree.ts";
+export { suggestRole } from "./credit/suggest.ts";
 export { synthesizeSession } from "./pop/synthesize.ts";
 export { toJats, toProvenanceManifest } from "./manifest/export.ts";
