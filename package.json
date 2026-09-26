@@ -13,7 +13,6 @@
     "test": "node scripts/run-tests.mjs",
     "typecheck": "tsc --noEmit",
     "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/cli.js",
-    "prepare": "npm run build",
     "zk-scribe": "node --experimental-strip-types src/cli.ts"
   },
   "dependencies": {
