@@ -1,4 +1,5 @@
 import { canonicalHash, utf8 } from "../canon.ts";
+import { authorEndorsementValid, endorseStatement, type AuthorEndorsement } from "../author/endorse.ts";
 import { getRole, type CreditRoleId, type Feasibility } from "../credit/taxonomy.ts";
 import { commit, hexToPoint, hexToScalar, pointToHex, randomScalar, scalarToHex } from "../crypto/group.ts";
 import { proveInterval, verifyInterval, type IntervalProof } from "../crypto/range.ts";
@@ -70,6 +71,7 @@ export type Attestation = {
     agentPublicKey: string;
     signature: string;
   };
+  author?: AuthorEndorsement;
 };
 
 export type Witness = {
@@ -87,12 +89,14 @@ export type AttestInput = {
   agentSecretKey: Uint8Array;
   session?: SessionLog;
   assertion?: string;
+  authorSecretKey?: Uint8Array;
 };
 
 export type VerifyOptions = {
   trustedAgentKey: string;
   expectedPolicy?: Policy;
   require?: "process" | "process-proven";
+  requireAuthor?: boolean;
 };
 
 export type VerifyResult = {
@@ -209,13 +213,16 @@ export function attest(input: AttestInput): { attestation: Attestation; witness:
   }
 
   const agentPublicKey = encodeKey(publicKeyFromSecret(input.agentSecretKey));
+  const statementHash = canonicalHash(statement);
+  const author = input.authorSecretKey ? endorseStatement(statementHash, input.authorSecretKey) : undefined;
   const payload = signedPayload({
     action,
     agentPublicKey,
     policyHash: policyHash(input.policy),
-    statementHash: canonicalHash(statement),
+    statementHash,
     commitments,
     rangeProofs,
+    author,
   });
   const attestation: Attestation = {
     version: "zk-scribe/0.1.0",
@@ -228,6 +235,7 @@ export function attest(input: AttestInput): { attestation: Attestation; witness:
       agentPublicKey,
       signature: encodeKey(sign(utf8(payload), input.agentSecretKey)),
     },
+    ...(author ? { author } : {}),
   };
   const witness: Witness | null = extraction
     ? {
@@ -273,13 +281,15 @@ export function verify(attestation: Attestation, options: VerifyOptions): Verify
       reasons.push(`Policy does not allow ${attestation.cva.action}.`);
     }
 
+    const statementHash = canonicalHash(attestation.statement);
     const payload = signedPayload({
       action: attestation.cva.action,
       agentPublicKey: attestation.cva.agentPublicKey,
       policyHash: embeddedHash,
-      statementHash: canonicalHash(attestation.statement),
+      statementHash,
       commitments: attestation.commitments,
       rangeProofs: attestation.rangeProofs,
+      author: attestation.author,
     });
     signatureValid = verifySignature(
       decodeSignature(attestation.cva.signature),
@@ -287,6 +297,10 @@ export function verify(attestation: Attestation, options: VerifyOptions): Verify
       decodePublicKey(attestation.cva.agentPublicKey),
     );
     if (!signatureValid) reasons.push("Agent signature is invalid.");
+    if (attestation.author && !authorEndorsementValid(statementHash, attestation.author)) {
+      reasons.push("Author endorsement does not match the statement.");
+    }
+    if (options.requireAuthor && !attestation.author) reasons.push("Author endorsement is required.");
 
     proofsValid = checkProofs(attestation, reasons);
     checkBinding(attestation, reasons);
@@ -458,8 +472,18 @@ function signedPayload(body: {
   statementHash: string;
   commitments: Attestation["commitments"];
   rangeProofs: Attestation["rangeProofs"];
+  author?: AuthorEndorsement;
 }): string {
-  return canonicalHash(body);
+  const payload: Record<string, unknown> = {
+    action: body.action,
+    agentPublicKey: body.agentPublicKey,
+    commitments: body.commitments,
+    policyHash: body.policyHash,
+    rangeProofs: body.rangeProofs,
+    statementHash: body.statementHash,
+  };
+  if (body.author) payload.author = body.author;
+  return canonicalHash(payload);
 }
 
 function sameProofSystem(value: Statement["proofSystem"]): boolean {
