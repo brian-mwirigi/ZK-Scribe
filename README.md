@@ -40,7 +40,7 @@ Failure to prove composition is not an accusation of misconduct. It means this l
 Requires Node.js 22 or newer.
 
 ```sh
-npm install -g github:brian-mwirigi/ZK-Scribe
+npm install -g https://github.com/brian-mwirigi/ZK-Scribe/archive/main.tar.gz
 cd /path/to/manuscript
 zk-scribe init
 zk-scribe status
