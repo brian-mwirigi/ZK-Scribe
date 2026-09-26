@@ -50,15 +50,22 @@ npm run zk-scribe -- export attestation.json --format c2pa
 npm run zk-scribe -- export attestation.json --format jats
 ```
 
-`init` writes three files:
+`init` writes:
 
 - `.zk-scribe/private/agent.seed` — stays on this machine and is gitignored
 - `.zk-scribe/agent.public.json` — the publisher's trust anchor
 - `.zk-scribe/policy.json` — the consent policy the signature commits to
+- `.zk-scribe/config.json` — the default CRediT role used when `attest` omits `--role`
 
 `attest` also writes `attestation.witness.json`. That file opens the commitments. Keep it local. The default policy denies exporting it.
 
 `record` times an interactive terminal session. Typed characters are echoed and then discarded; the saved log stores operation, length, timestamp, and a boundary flag. Ctrl+D saves the log. Ctrl+C discards it. Editor hooks for Overleaf and local markdown come after this log format.
+
+## Commands
+
+`explain`, `doctor`, `hash`, `suggest`, `summary`, `histogram`, `ledger`, `diffstat`, `policy`, `stats`, `profile`, `id`, and `benchmark` sit beside `attest` and `verify`. Running `zk-scribe` with no arguments prints the full list.
+
+`stats` and `profile` read a local session and print counts or pause percentiles. They do not write an attestation. `id` prints a bundle id from the statement hash and the agent key. `benchmark` times one small range proof. `verify` refuses a key listed in `.zk-scribe/revoked.json` when that file exists.
 
 ## Roles
 
