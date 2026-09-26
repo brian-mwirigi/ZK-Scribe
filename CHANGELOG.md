@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+The attestation statement version stays `zk-scribe/0.1.0`.
+
+- Install with one script. `zk-scribe init` in a manuscript repository watches the working directory and installs a commit hook.
+- Commits attest the session that was observed. A save is recorded as one edit. The agent does not invent keystrokes.
+- `zk-scribe status` shows how many sessions are on the ledger.
+
 ## 0.2.0
 
 The attestation statement version stays `zk-scribe/0.1.0`. Package and CLI versions move to 0.2.0.

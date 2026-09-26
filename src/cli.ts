@@ -32,6 +32,9 @@ import { bundleId } from "./pop/bundle-id.ts";
 import { sessionStats } from "./pop/stats.ts";
 import type { SessionLog } from "./pop/session.ts";
 import { synthesizeSession } from "./pop/synthesize.ts";
+import { scanOnce, startWatcher, watchLabel } from "./capture/watch.ts";
+import { ensureLocalIgnore, installCommitHook, runCommitHook } from "./git/hook.ts";
+import { statusCounts, statusText } from "./status.ts";
 import { VERSION } from "./version.ts";
 
 type Flags = Record<string, string | boolean>;
@@ -41,6 +44,7 @@ Cryptographic authorship and contribution attestation.
 
 Usage:
   zk-scribe init [--dir .] [--force]
+  zk-scribe status [--dir .]
   zk-scribe example --kind composition|transcription|automated|paste --out session.json
   zk-scribe record --out session.json
   zk-scribe attest --file manuscript.md [--role <credit-role>] [--session session.json] [--assert "claim"] [--author-seed author.seed] [--grant grant.json] [--out attestation.json]
@@ -70,11 +74,14 @@ Usage:
 
 function main(argv: string[]): void {
   const { command, flags, positionals } = parseArgs(argv);
-  if (!command || flags.help === true || command === "help") {
+  if (!command || flags.help === true || command === "help" || command === "--help") {
     process.stdout.write(HELP);
     return;
   }
   if (command === "init") return init(String(flags.dir ?? "."), flags.force === true);
+  if (command === "status") return statusCommand(flags);
+  if (command === "watch") return watchCommand(flags);
+  if (command === "hook") return runCommitHook(path.resolve(String(flags.dir ?? ".")));
   if (command === "example") return example(flags);
   if (command === "record") return void record(String(flags.out ?? "session.json")).catch(fail);
   if (command === "attest") return attestCommand(flags);
@@ -102,25 +109,66 @@ function main(argv: string[]): void {
 }
 
 function init(dir: string, force: boolean): void {
-  const root = path.join(dir, ".zk-scribe");
+  const rootDir = path.resolve(dir);
+  const root = path.join(rootDir, ".zk-scribe");
   const seedPath = path.join(root, "private", "agent.seed");
+  const publicPath = path.join(root, "agent.public.json");
   fs.mkdirSync(path.dirname(seedPath), { recursive: true });
-  if (fs.existsSync(seedPath) && !force) {
-    throw new Error("An agent seed already exists. Pass --force to replace it.");
+  const kept = fs.existsSync(seedPath) && !force;
+  if (!kept) {
+    const key = generateAgentKey();
+    fs.writeFileSync(seedPath, `${encodeKey(key.secretKey)}\n`);
+    fs.writeFileSync(publicPath, publicKeyFile(encodeKey(key.publicKey)));
+  } else if (!fs.existsSync(publicPath)) {
+    const secret = decodeSecretKey(fs.readFileSync(seedPath, "utf8").trim());
+    fs.writeFileSync(publicPath, publicKeyFile(encodeKey(publicKeyFromSecret(secret))));
   }
-  const key = generateAgentKey();
-  fs.writeFileSync(seedPath, `${encodeKey(key.secretKey)}\n`);
-  fs.writeFileSync(
-    path.join(root, "agent.public.json"),
-    `${JSON.stringify({ version: "zk-scribe-agent/0.1.0", algorithm: "ed25519", publicKey: encodeKey(key.publicKey) }, null, 2)}\n`,
-  );
-  fs.writeFileSync(path.join(root, "policy.json"), `${JSON.stringify(defaultPolicy(), null, 2)}\n`);
+  const policyPath = path.join(root, "policy.json");
+  if (!fs.existsSync(policyPath) || force) {
+    fs.writeFileSync(policyPath, `${JSON.stringify(defaultPolicy(), null, 2)}\n`);
+  }
   const configPath = path.join(root, "config.json");
   if (!fs.existsSync(configPath) || force) {
     fs.writeFileSync(configPath, `${JSON.stringify(defaultConfig(), null, 2)}\n`);
   }
-  process.stdout.write(`Initialized ${root}\n`);
-  process.stdout.write("The seed in .zk-scribe/private/ stays local. Commit agent.public.json, policy.json, and config.json.\n");
+  ensureLocalIgnore(rootDir);
+  const hooked = installCommitHook(rootDir);
+  const watching = process.stdout.isTTY === true && startWatcher(rootDir);
+  process.stdout.write(kept ? "Agent key is on this machine.\n" : `Initialized ${root}\n`);
+  process.stdout.write("The seed in .zk-scribe/private/ stays local.\n");
+  if (hooked) process.stdout.write("Commit hook installed.\n");
+  if (watching) process.stdout.write(`Watching ${watchLabel(rootDir)}\n`);
+  process.stdout.write("zk-scribe status\n");
+}
+
+function publicKeyFile(publicKey: string): string {
+  return `${JSON.stringify({ version: "zk-scribe-agent/0.1.0", algorithm: "ed25519", publicKey }, null, 2)}\n`;
+}
+
+function statusCommand(flags: Flags): void {
+  process.stdout.write(statusText(statusCounts(path.resolve(String(flags.dir ?? ".")))));
+}
+
+function watchCommand(flags: Flags): void {
+  const dir = path.resolve(String(flags.dir ?? "."));
+  const pid = path.join(dir, ".zk-scribe", "private", "watch.pid");
+  fs.mkdirSync(path.dirname(pid), { recursive: true });
+  fs.writeFileSync(pid, `${process.pid}\n`);
+  const tick = () => {
+    try {
+      scanOnce(dir);
+    } catch {
+      // A bad save stays out of the session. The next one still gets a chance.
+    }
+  };
+  tick();
+  const timer = setInterval(tick, 500);
+  const stop = () => {
+    clearInterval(timer);
+    process.exit(0);
+  };
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
 }
 
 function example(flags: Flags): void {

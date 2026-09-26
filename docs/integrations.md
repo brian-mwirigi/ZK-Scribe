@@ -23,12 +23,15 @@ The sync job should fail the build when the attestation is missing or invalid. T
 
 Manubot already stores the manuscript in Git and compiles it with GitHub Actions through Pandoc to HTML, PDF, and JATS. That matches the agent.
 
-1. Authors write in a local editor. The timing log comes from `record` or from an editor hook that emits the same JSON.
-2. `attest` binds the proof to the commit the manuscript is on.
-3. CI runs the verifier.
-4. `export --format jats` supplies a `custom-meta-group` for the JATS header. The full attestation file remains the signature bundle.
+1. Install ZK-Scribe with the one-line installer.
+2. In the manuscript repository, run `zk-scribe init`. That watches `content/` and installs a pre-commit hook.
+3. Keep writing and committing. The hook attests the observed session. `zk-scribe status` shows the ledger.
+4. CI runs the verifier.
+5. `export --format jats` supplies a `custom-meta-group` for the JATS header. The full attestation file remains the signature bundle.
 
-Copy [integrations/manubot/verify-attestation.yml](../integrations/manubot/verify-attestation.yml) into the manuscript repository once `attestation.json`, `.zk-scribe/agent.public.json`, and `.zk-scribe/policy.json` are committed there. Do not commit `.zk-scribe/private/` or `*.witness.json`.
+`record` is still there for a terminal session whose timing can meet the composition bounds. The hook uses that local session when it exists. Otherwise it attests the commit's text change as one edit, and a bulk change is refused.
+
+Copy [integrations/manubot/verify-attestation.yml](../integrations/manubot/verify-attestation.yml) into the manuscript repository once `attestation.json`, `.zk-scribe/agent.public.json`, and `.zk-scribe/policy.json` are committed there. `init` stages those public files on the next manuscript commit. Do not commit `.zk-scribe/private/` or `*.witness.json`.
 
 ## Disclosure
 

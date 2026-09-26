@@ -37,7 +37,28 @@ Failure to prove composition is not an accusation of misconduct. It means this l
 
 ## Quick start
 
-Requires Node.js 22 or newer.
+Requires Node.js 22 or newer. The installer provides it when the machine does not already have it.
+
+```sh
+curl -fsSL https://brianmunene.me/zkscribe/install.sh | sh
+cd /path/to/manuscript
+zk-scribe init
+zk-scribe status
+```
+
+On Windows:
+
+```powershell
+irm https://brianmunene.me/zkscribe/install.ps1 | iex
+```
+
+`init` is the opt-in. It writes the agent key, starts watching the manuscript directory, and installs a git pre-commit hook. The next commits attest the observed session and leave `attestation.json` plus a ledger under `.zk-scribe/ledger/`. The event log and the commitment openings stay in `.zk-scribe/private/`.
+
+`status` is the first thing to read after a few commits. A line such as `3 sessions attested, ledger building` means the hook is writing the ledger. The next line says how many of those are `process-proven` and how many were refused. A refusal is not a process proof.
+
+A file save is one edit of the length that actually changed. ZK-Scribe does not split that save into fake keystrokes. Composition still requires the timing bounds, so a bulk save is refused. A session captured with `record`, or any log that already meets the bounds, is what the hook certifies.
+
+From a checkout of this repository, the same commands are available with `npm install` and `npm run zk-scribe --`.
 
 ```bash
 npm install
@@ -63,7 +84,7 @@ npm run zk-scribe -- export attestation.json --format jats
 
 ## Commands
 
-`explain`, `doctor`, `hash`, `suggest`, `summary`, `histogram`, `ledger`, `diffstat`, `policy`, `grant`, `govern`, `journal`, `stats`, `profile`, `id`, and `benchmark` sit beside `attest` and `verify`. Running `zk-scribe` with no arguments prints the full list.
+`status` reads the ledger. `init` installs the commit hook. `explain`, `doctor`, `hash`, `suggest`, `summary`, `histogram`, `ledger`, `diffstat`, `policy`, `grant`, `govern`, `journal`, `stats`, `profile`, `id`, and `benchmark` sit beside `attest` and `verify`. Running `zk-scribe` with no arguments prints the full list.
 
 `stats` and `profile` read a local session and print counts or pause percentiles. They do not write an attestation. `id` prints a bundle id from the statement hash and the agent key. `benchmark` times one small range proof. `verify` refuses a key listed in `.zk-scribe/revoked.json` when that file exists. `grant` lets an author key scope the agent to one manuscript and a list of actions. When `.zk-scribe/grant.json` is present, `attest` and `export` refuse anything outside that grant, and the attestation signature covers the grant hash. `govern` records the decision in `.zk-scribe/private/journal.jsonl`. `journal` checks that signed chain.
 
