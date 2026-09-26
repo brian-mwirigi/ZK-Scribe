@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import { sha256Hex, utf8 } from "./canon.ts";
+import { rangeBenchmark } from "./crypto/benchmark.ts";
 import { applyTextDelta, eventFromKey, type KeyInfo } from "./capture/keys.ts";
 import { CREDIT_ROLES } from "./credit/taxonomy.ts";
 import { suggestRole } from "./credit/suggest.ts";
@@ -56,6 +57,7 @@ Usage:
   zk-scribe stats --session session.json
   zk-scribe profile --session session.json
   zk-scribe id <attestation.json>
+  zk-scribe benchmark
   zk-scribe credit
 `;
 
@@ -84,6 +86,7 @@ function main(argv: string[]): void {
   if (command === "stats") return statsCommand(flags);
   if (command === "profile") return profileCommand(flags);
   if (command === "id") return idCommand(flags, positionals);
+  if (command === "benchmark") return benchmarkCommand();
   if (command === "credit") return credit();
   throw new Error(`Unknown command "${command}".\n\n${HELP}`);
 }
@@ -260,6 +263,10 @@ function idCommand(flags: Flags, positionals: string[]): void {
   if (!target) throw new Error("Pass an attestation file.");
   const attestation = readJson<Attestation>(resolveIn(projectDir(flags), target));
   process.stdout.write(`${bundleId(attestation)}\n`);
+}
+
+function benchmarkCommand(): void {
+  process.stdout.write(`${JSON.stringify(rangeBenchmark(), null, 2)}\n`);
 }
 
 function policyCommand(flags: Flags): void {
