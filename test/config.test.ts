@@ -12,3 +12,8 @@ test("project config keeps a default role and rejects a bad environment", () => 
   });
   assert.equal(parsed.environment, "overleaf-git");
 });
+
+test("a saved config round-trips through JSON", () => {
+  const saved = JSON.parse(JSON.stringify(defaultConfig())) as unknown;
+  assert.equal(parseConfig(saved).defaultRole, "writing-original-draft");
+});

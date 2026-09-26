@@ -21,6 +21,7 @@ import { attest, audit, verify, type Attestation, type Witness } from "./pop/att
 import { extract } from "./pop/extract.ts";
 import { explainFeatures } from "./pop/explain.ts";
 import { pauseHistogram } from "./pop/histogram.ts";
+import { defaultConfig, parseConfig, type ProjectConfig } from "./config.ts";
 import { sessionStats } from "./pop/stats.ts";
 import type { SessionLog } from "./pop/session.ts";
 import { synthesizeSession } from "./pop/synthesize.ts";
@@ -35,7 +36,7 @@ Usage:
   zk-scribe init [--dir .] [--force]
   zk-scribe example --kind composition|transcription|automated|paste --out session.json
   zk-scribe record --out session.json
-  zk-scribe attest --file manuscript.md --role <credit-role> [--session session.json] [--assert "claim"] [--author-seed author.seed] [--out attestation.json]
+  zk-scribe attest --file manuscript.md [--role <credit-role>] [--session session.json] [--assert "claim"] [--author-seed author.seed] [--out attestation.json]
   zk-scribe verify <attestation.json> [--require process|process-proven] [--require-author] [--agent-key hex] [--policy policy.json]
   zk-scribe audit --attestation attestation.json --session session.json --witness attestation.witness.json
   zk-scribe export <attestation.json> --format c2pa|jats|summary|html [--out file]
@@ -93,8 +94,12 @@ function init(dir: string, force: boolean): void {
     `${JSON.stringify({ version: "zk-scribe-agent/0.1.0", algorithm: "ed25519", publicKey: encodeKey(key.publicKey) }, null, 2)}\n`,
   );
   fs.writeFileSync(path.join(root, "policy.json"), `${JSON.stringify(defaultPolicy(), null, 2)}\n`);
+  const configPath = path.join(root, "config.json");
+  if (!fs.existsSync(configPath) || force) {
+    fs.writeFileSync(configPath, `${JSON.stringify(defaultConfig(), null, 2)}\n`);
+  }
   process.stdout.write(`Initialized ${root}\n`);
-  process.stdout.write("The seed in .zk-scribe/private/ stays local. Commit agent.public.json and policy.json.\n");
+  process.stdout.write("The seed in .zk-scribe/private/ stays local. Commit agent.public.json, policy.json, and config.json.\n");
 }
 
 function example(flags: Flags): void {
@@ -112,7 +117,7 @@ function example(flags: Flags): void {
 function attestCommand(flags: Flags): void {
   const dir = projectDir(flags);
   const file = resolveIn(dir, required(flags, "file"));
-  const role = required(flags, "role");
+  const role = roleFor(dir, flags);
   const out = resolveIn(dir, String(flags.out ?? "attestation.json"));
   const policy = loadPolicy(dir, flags.policy);
   const secret = loadSecret(dir);
@@ -137,6 +142,13 @@ function attestCommand(flags: Flags): void {
   process.stdout.write(`Wrote ${out}\n`);
   if (witness) process.stdout.write(`Wrote ${witnessPathFor(out)} (keep this local)\n`);
   if (binding === "unsupported") process.exitCode = 1;
+}
+
+function roleFor(dir: string, flags: Flags): string {
+  if (typeof flags.role === "string" && flags.role.trim() !== "") return flags.role;
+  const configPath = path.join(dir, ".zk-scribe", "config.json");
+  if (!fs.existsSync(configPath)) throw new Error("Pass --role, or add defaultRole to .zk-scribe/config.json.");
+  return parseConfig(JSON.parse(fs.readFileSync(configPath, "utf8")) as ProjectConfig).defaultRole;
 }
 
 function authorSeed(dir: string, value: string | boolean | undefined): Uint8Array | undefined {
