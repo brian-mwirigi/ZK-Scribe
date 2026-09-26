@@ -8,6 +8,7 @@ import { CREDIT_ROLES } from "./credit/taxonomy.ts";
 import { suggestRole } from "./credit/suggest.ts";
 import { defaultPolicy, type Policy } from "./cva/policy.ts";
 import { detectContext, type ExecutionContext } from "./git/context.ts";
+import { parseDiffStat, reviewNote } from "./git/diffstat.ts";
 import { hashTree, ignoredTreePath, type TreeFile } from "./hash/tree.ts";
 import { doctorReport } from "./doctor.ts";
 import { decodeSecretKey, encodeKey, generateAgentKey } from "./keys.ts";
@@ -42,6 +43,7 @@ Usage:
   zk-scribe summary <attestation.json>
   zk-scribe histogram --session session.json
   zk-scribe ledger <attestation.json>...
+  zk-scribe diffstat <changes.diff> [--content-hash hex]
   zk-scribe credit
 `;
 
@@ -65,6 +67,7 @@ function main(argv: string[]): void {
   if (command === "summary") return summaryCommand(flags, positionals);
   if (command === "histogram") return histogramCommand(flags);
   if (command === "ledger") return ledgerCommand(flags, positionals);
+  if (command === "diffstat") return diffstatCommand(flags, positionals);
   if (command === "credit") return credit();
   throw new Error(`Unknown command "${command}".\n\n${HELP}`);
 }
@@ -197,6 +200,16 @@ function exportCommand(flags: Flags, positionals: string[]): void {
     return;
   }
   throw new Error("Pass --format c2pa, jats, or summary.");
+}
+
+function diffstatCommand(flags: Flags, positionals: string[]): void {
+  const target = positionals[0];
+  if (!target) throw new Error("Pass a unified diff file.");
+  const diff = fs.readFileSync(resolveIn(projectDir(flags), target), "utf8");
+  const stat = parseDiffStat(diff);
+  const contentHash = flags["content-hash"];
+  const body = typeof contentHash === "string" ? reviewNote(contentHash, stat) : stat;
+  process.stdout.write(`${JSON.stringify(body, null, 2)}\n`);
 }
 
 function ledgerCommand(flags: Flags, positionals: string[]): void {
