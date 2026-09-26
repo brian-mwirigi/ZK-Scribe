@@ -7,7 +7,15 @@
     "node": ">=22"
   },
   "bin": {
-    "zk-scribe": "./bin/zk-scribe.js"
+    "zk-scribe": "bin/zk-scribe.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "NOTICE"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "test": "node scripts/run-tests.mjs",
