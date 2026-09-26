@@ -3,10 +3,13 @@ import type { Attestation } from "../pop/attest.ts";
 import { VERSION } from "../version.ts";
 
 export function toProvenanceManifest(attestation: Attestation) {
+  const statementHash = canonicalHash(attestation.statement);
   return {
     version: "zk-scribe-manifest/0.1.0",
     claim_generator: `ZK-Scribe/${VERSION}`,
     profile: "zk-scribe.c2pa-shaped.v1",
+    contentHash: attestation.statement.contentHash,
+    statementHash,
     note: "Assertion labels follow the C2PA vocabulary. This JSON profile is not a JUMBF or COSE C2PA box.",
     assertions: [
       {
@@ -19,7 +22,7 @@ export function toProvenanceManifest(attestation: Attestation) {
       {
         label: "zk-scribe.process-attestation",
         data: {
-          statementHash: canonicalHash(attestation.statement),
+          statementHash,
           attestation,
         },
       },
