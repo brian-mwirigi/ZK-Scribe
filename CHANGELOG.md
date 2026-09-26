@@ -18,3 +18,4 @@ The attestation statement version stays `zk-scribe/0.1.0`. Package and CLI versi
 - Put content and statement hashes on the manifest envelope, and print a bundle id.
 - Time one small range proof.
 - Scope the agent with an author-signed grant and record governed decisions in a signed local journal.
+- License the trust core under Apache 2.0. The hosted publisher service stays a separate product.

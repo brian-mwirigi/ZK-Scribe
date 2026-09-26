@@ -1,7 +1,6 @@
 {
   "name": "zk-scribe",
   "version": "0.2.0",
-  "private": true,
   "description": "Cryptographic authorship and contribution attestation for academic writing.",
   "type": "module",
   "engines": {
@@ -24,5 +23,5 @@
     "@types/node": "^24.19.0",
     "typescript": "^5.9.3"
   },
-  "license": "UNLICENSED"
+  "license": "Apache-2.0"
 }

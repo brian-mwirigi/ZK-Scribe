@@ -87,3 +87,11 @@ src/capture    Terminal key classification
 ```
 
 Further reading: [architecture](docs/architecture.md), [threat model](docs/threat-model.md), [integrations](docs/integrations.md).
+
+## License
+
+This repository is the open trust core, under the [Apache License 2.0](LICENSE).
+
+The core is the local agent and the proof check: keystroke-timing capture, proof generation, manuscript and Git binding, the on-machine consent policy, and `verify`. A researcher can read the code that handles timing on their machine. Anyone can check an attestation without a ZK-Scribe server.
+
+The hosted institutional verification service, publisher-workflow connectors, and compliance dashboards are a separate convenience product. They sit outside this repository.
