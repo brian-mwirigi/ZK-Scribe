@@ -24,6 +24,7 @@ import { pauseHistogram } from "./pop/histogram.ts";
 import { parseRevocationList } from "./cva/revocation.ts";
 import { defaultConfig, parseConfig, type ProjectConfig } from "./config.ts";
 import { localProfile } from "./pop/profile.ts";
+import { bundleId } from "./pop/bundle-id.ts";
 import { sessionStats } from "./pop/stats.ts";
 import type { SessionLog } from "./pop/session.ts";
 import { synthesizeSession } from "./pop/synthesize.ts";
@@ -54,6 +55,7 @@ Usage:
   zk-scribe policy
   zk-scribe stats --session session.json
   zk-scribe profile --session session.json
+  zk-scribe id <attestation.json>
   zk-scribe credit
 `;
 
@@ -81,6 +83,7 @@ function main(argv: string[]): void {
   if (command === "policy") return policyCommand(flags);
   if (command === "stats") return statsCommand(flags);
   if (command === "profile") return profileCommand(flags);
+  if (command === "id") return idCommand(flags, positionals);
   if (command === "credit") return credit();
   throw new Error(`Unknown command "${command}".\n\n${HELP}`);
 }
@@ -250,6 +253,13 @@ function statsCommand(flags: Flags): void {
 function profileCommand(flags: Flags): void {
   const session = readJson<SessionLog>(resolveIn(projectDir(flags), required(flags, "session")));
   process.stdout.write(`${JSON.stringify(localProfile(session), null, 2)}\n`);
+}
+
+function idCommand(flags: Flags, positionals: string[]): void {
+  const target = positionals[0];
+  if (!target) throw new Error("Pass an attestation file.");
+  const attestation = readJson<Attestation>(resolveIn(projectDir(flags), target));
+  process.stdout.write(`${bundleId(attestation)}\n`);
 }
 
 function policyCommand(flags: Flags): void {
