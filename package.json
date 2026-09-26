@@ -12,6 +12,8 @@
   "scripts": {
     "test": "node scripts/run-tests.mjs",
     "typecheck": "tsc --noEmit",
+    "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/cli.js",
+    "prepare": "npm run build",
     "zk-scribe": "node --experimental-strip-types src/cli.ts"
   },
   "dependencies": {
@@ -21,7 +23,16 @@
   },
   "devDependencies": {
     "@types/node": "^24.19.0",
+    "esbuild": "^0.28.2",
     "typescript": "^5.9.3"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brian-mwirigi/ZK-Scribe.git"
+  },
+  "homepage": "https://brianmunene.me/zkscribe",
+  "bugs": {
+    "url": "https://github.com/brian-mwirigi/ZK-Scribe/issues"
+  }
 }

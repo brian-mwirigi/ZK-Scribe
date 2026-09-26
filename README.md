@@ -37,19 +37,13 @@ Failure to prove composition is not an accusation of misconduct. It means this l
 
 ## Quick start
 
-Requires Node.js 22 or newer. The installer provides it when the machine does not already have it.
+Requires Node.js 22 or newer.
 
 ```sh
-curl -fsSL https://brianmunene.me/zkscribe/install.sh | sh
+npm install -g github:brian-mwirigi/ZK-Scribe
 cd /path/to/manuscript
 zk-scribe init
 zk-scribe status
-```
-
-On Windows:
-
-```powershell
-irm https://brianmunene.me/zkscribe/install.ps1 | iex
 ```
 
 `init` is the opt-in. It writes the agent key, starts watching the manuscript directory, and installs a git pre-commit hook. The next commits attest the observed session and leave `attestation.json` plus a ledger under `.zk-scribe/ledger/`. The event log and the commitment openings stay in `.zk-scribe/private/`.

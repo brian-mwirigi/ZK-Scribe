@@ -23,7 +23,7 @@ The sync job should fail the build when the attestation is missing or invalid. T
 
 Manubot already stores the manuscript in Git and compiles it with GitHub Actions through Pandoc to HTML, PDF, and JATS. That matches the agent.
 
-1. Install ZK-Scribe with the one-line installer.
+1. Install with `npm install -g github:brian-mwirigi/ZK-Scribe`. Node.js 22 or newer.
 2. In the manuscript repository, run `zk-scribe init`. That watches `content/` and installs a pre-commit hook.
 3. Keep writing and committing. The hook attests the observed session. `zk-scribe status` shows the ledger.
 4. CI runs the verifier.

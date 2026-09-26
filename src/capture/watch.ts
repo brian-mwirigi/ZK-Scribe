@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { eventsFromEdit } from "./edits.ts";
+import { cliArgs } from "../entry.ts";
 import type { KeyEvent, SessionLog } from "../pop/session.ts";
 
 const TEXT = new Set([".md", ".markdown", ".tex", ".txt"]);
@@ -107,8 +107,7 @@ export function watcherAlive(dir: string): boolean {
 
 export function startWatcher(dir: string): boolean {
   if (watcherAlive(dir)) return true;
-  const cli = fileURLToPath(new URL("../cli.ts", import.meta.url));
-  const child = spawn(process.execPath, ["--experimental-strip-types", cli, "watch", "--dir", dir], {
+  const child = spawn(process.execPath, [...cliArgs(), "watch", "--dir", dir], {
     cwd: dir,
     detached: true,
     stdio: "ignore",

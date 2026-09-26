@@ -1,8 +1,8 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { eventsFromEdit } from "../capture/edits.ts";
+import { cliArgs } from "../entry.ts";
 import {
   isManuscriptRelative,
   readSession,
@@ -62,7 +62,6 @@ export function runCommitHook(dir: string): void {
 }
 
 function attestFile(dir: string, relative: string, sessionFile: string): boolean {
-  const cli = fileURLToPath(new URL("../cli.ts", import.meta.url));
   const privateOut = path.join(dir, ".zk-scribe", "private", "last-attestation.json");
   const privateWitness = path.join(dir, ".zk-scribe", "private", "last-attestation.witness.json");
   if (fs.existsSync(privateOut)) fs.rmSync(privateOut);
@@ -70,8 +69,7 @@ function attestFile(dir: string, relative: string, sessionFile: string): boolean
   spawnSync(
     process.execPath,
     [
-      "--experimental-strip-types",
-      cli,
+      ...cliArgs(),
       "attest",
       "--dir",
       dir,
@@ -170,10 +168,10 @@ function hooksDirectory(dir: string): string | null {
 
 function hookBlock(dir: string): string {
   const node = process.execPath.replaceAll("\\", "/");
-  const cli = fileURLToPath(new URL("../cli.ts", import.meta.url)).replaceAll("\\", "/");
+  const args = cliArgs().map((arg) => `"${arg.replaceAll("\\", "/")}"`).join(" ");
   const root = path.resolve(dir).replaceAll("\\", "/");
   return `${BEGIN}
-"${node}" --experimental-strip-types "${cli}" hook --dir "${root}" >/dev/null 2>&1 || true
+"${node}" ${args} hook --dir "${root}" >/dev/null 2>&1 || true
 ${END}
 `;
 }
