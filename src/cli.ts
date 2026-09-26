@@ -5,6 +5,7 @@ import readline from "node:readline";
 import { sha256Hex, utf8 } from "./canon.ts";
 import { applyTextDelta, eventFromKey, type KeyInfo } from "./capture/keys.ts";
 import { CREDIT_ROLES } from "./credit/taxonomy.ts";
+import { suggestRole } from "./credit/suggest.ts";
 import { defaultPolicy, type Policy } from "./cva/policy.ts";
 import { detectContext, type ExecutionContext } from "./git/context.ts";
 import { hashTree, ignoredTreePath, type TreeFile } from "./hash/tree.ts";
@@ -34,6 +35,7 @@ Usage:
   zk-scribe explain --session session.json
   zk-scribe doctor [--dir .]
   zk-scribe hash <file-or-directory>
+  zk-scribe suggest <file>
   zk-scribe credit
 `;
 
@@ -53,6 +55,7 @@ function main(argv: string[]): void {
   if (command === "explain") return explainCommand(flags);
   if (command === "doctor") return doctorCommand(flags);
   if (command === "hash") return hashCommand(flags, positionals);
+  if (command === "suggest") return suggestCommand(flags, positionals);
   if (command === "credit") return credit();
   throw new Error(`Unknown command "${command}".\n\n${HELP}`);
 }
@@ -169,6 +172,12 @@ function exportCommand(flags: Flags, positionals: string[]): void {
     return;
   }
   throw new Error("Pass --format c2pa or --format jats.");
+}
+
+function suggestCommand(flags: Flags, positionals: string[]): void {
+  const target = positionals[0];
+  if (!target) throw new Error("Pass a manuscript path to suggest a role.");
+  process.stdout.write(`${JSON.stringify(suggestRole(resolveIn(projectDir(flags), target)), null, 2)}\n`);
 }
 
 function hashCommand(flags: Flags, positionals: string[]): void {
