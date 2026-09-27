@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
 // src/cli.ts
-import fs4 from "node:fs";
-import path5 from "node:path";
+import fs5 from "node:fs";
+import path6 from "node:path";
 import readline from "node:readline";
+import { fileURLToPath } from "node:url";
 
 // src/canon.ts
 import { sha256 } from "@noble/hashes/sha2.js";
@@ -343,6 +344,524 @@ function applyTextDelta(buffer, event, textDelta) {
   return buffer;
 }
 
+// src/capture/overleaf.ts
+import { randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
+import fs2 from "node:fs";
+import http from "node:http";
+import path2 from "node:path";
+
+// src/capture/watch.ts
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+
+// src/pop/constants.ts
+var PLANNING_PAUSE_MIN_MS = 1e3;
+var PLANNING_PAUSE_MAX_MS = 5e3;
+var PEAK_WINDOW_MS = 2e3;
+var BULK_INSERT_CHARS = 15;
+var MIN_COMPOSITION_DURATION_MS = 8e3;
+var MIN_COMPOSITION_INSERTS = 20;
+var FEATURE_KEYS = [
+  "medianIkiMs",
+  "ikiCvTimes100",
+  "planningPauses",
+  "boundaryPauses",
+  "peakCpsTimes10",
+  "revisionPermille"
+];
+
+// src/capture/document.ts
+function eventsFromTextChange(change, t) {
+  const events = [];
+  if (change.removed > 0) events.push({ t, op: "delete", len: change.removed });
+  const inserted = change.inserted;
+  if (inserted.length > 0) {
+    const boundary = /[\s.!?;:\n]$/.test(inserted);
+    events.push({
+      t,
+      op: inserted.length >= BULK_INSERT_CHARS ? "paste" : "insert",
+      len: inserted.length,
+      ...boundary ? { boundary: true } : {}
+    });
+  }
+  return events;
+}
+
+// src/capture/edits.ts
+function eventsFromEdit(before, after, t) {
+  if (before === after) return [];
+  let prefix = 0;
+  const maxPrefix = Math.min(before.length, after.length);
+  while (prefix < maxPrefix && before.charCodeAt(prefix) === after.charCodeAt(prefix)) prefix += 1;
+  let suffix = 0;
+  const maxSuffix = maxPrefix - prefix;
+  while (suffix < maxSuffix && before.charCodeAt(before.length - 1 - suffix) === after.charCodeAt(after.length - 1 - suffix)) {
+    suffix += 1;
+  }
+  const removed = before.length - prefix - suffix;
+  const added = after.length - prefix - suffix;
+  const events = [];
+  if (removed > 0) events.push({ t, op: "delete", len: removed });
+  if (added > 0) {
+    const chunk = after.slice(prefix, after.length - suffix);
+    const boundary = /[\s.!?]$/.test(chunk);
+    events.push({ t, op: "insert", len: added, ...boundary ? { boundary: true } : {} });
+  }
+  return events;
+}
+
+// src/entry.ts
+function cliArgs() {
+  const script = process.argv[1] ?? "";
+  if (script.endsWith(".ts")) return ["--experimental-strip-types", script];
+  return [script];
+}
+
+// src/capture/watch.ts
+var TEXT = /* @__PURE__ */ new Set([".md", ".markdown", ".tex", ".txt"]);
+var SKIP = /* @__PURE__ */ new Set([".git", ".zk-scribe", "node_modules", "output", "build", "dist"]);
+var MAX_CHARS = 2e6;
+function watchLabel(dir) {
+  return fs.existsSync(path.join(dir, "content")) ? "content/" : "this directory";
+}
+function listManuscripts(dir) {
+  const content = path.join(dir, "content");
+  const root = fs.existsSync(content) && fs.statSync(content).isDirectory() ? content : dir;
+  const files = [];
+  const walk = (folder) => {
+    for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
+      if (entry.name.startsWith(".") || SKIP.has(entry.name)) continue;
+      const full = path.join(folder, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (isManuscriptName(entry.name)) files.push(full);
+    }
+  };
+  if (fs.existsSync(root)) walk(root);
+  return files;
+}
+function isManuscriptRelative(dir, relativePath) {
+  const normalized = relativePath.replaceAll("\\", "/");
+  if (!normalized || normalized.startsWith(".zk-scribe/") || normalized.split("/").some((part) => part.startsWith("."))) {
+    return false;
+  }
+  const base = normalized.slice(normalized.lastIndexOf("/") + 1);
+  if (!isManuscriptName(base)) return false;
+  const hasContent = fs.existsSync(path.join(dir, "content"));
+  if (hasContent && !normalized.startsWith("content/")) return false;
+  return true;
+}
+function sessionPath(dir) {
+  return path.join(dir, ".zk-scribe", "private", "session.json");
+}
+function readSession(dir) {
+  const file = sessionPath(dir);
+  if (!fs.existsSync(file)) return null;
+  const session = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (!Array.isArray(session.events) || session.events.length === 0) return null;
+  return session;
+}
+function rotateSession(dir) {
+  const file = sessionPath(dir);
+  if (fs.existsSync(file)) fs.rmSync(file);
+}
+function scanOnce(dir, now = Date.now()) {
+  const state = readState(dir);
+  const current = readSession(dir);
+  const started = current ? Date.parse(current.startedAt) : now;
+  let t = Math.max(0, now - (Number.isFinite(started) ? started : now));
+  if (current && current.events.length > 0) t = Math.max(t, current.events[current.events.length - 1].t);
+  const next = {};
+  const events = [];
+  const captured = current?.source === "editor" || current?.source === "overleaf" || current?.source === "record";
+  for (const file of listManuscripts(dir)) {
+    const relative = path.relative(dir, file).replaceAll("\\", "/");
+    const text = fs.readFileSync(file, "utf8");
+    if (text.length > MAX_CHARS) continue;
+    next[relative] = text;
+    if (captured) continue;
+    const before = state.files[relative];
+    if (before === void 0) continue;
+    const delta = eventsFromEdit(before, text, t);
+    if (delta.length === 0) continue;
+    events.push(...delta);
+    t += 1;
+  }
+  writeState(dir, { files: next });
+  if (captured || events.length === 0) return 0;
+  const session = current ?? {
+    sessionId: `watch-${now.toString(16)}`,
+    startedAt: new Date(now).toISOString(),
+    source: "watch",
+    events: []
+  };
+  session.events.push(...events);
+  writeSession(dir, session);
+  return events.length;
+}
+function watcherAlive(dir) {
+  const file = pidFile(dir);
+  if (!fs.existsSync(file)) return false;
+  const pid = Number(fs.readFileSync(file, "utf8").trim());
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function appendRemoteEdits(dir, changes, now = Date.now()) {
+  const current = readSession(dir);
+  const fresh = !current || current.source === "watch";
+  const started = fresh ? now : Date.parse(current.startedAt);
+  const origin = Number.isFinite(started) ? started : now;
+  let t = Math.max(0, now - origin);
+  if (!fresh && current.events.length > 0) t = Math.max(t, current.events[current.events.length - 1].t);
+  const events = changes.flatMap((change) => eventsFromTextChange(change, t));
+  if (events.length === 0) return 0;
+  const session = fresh ? {
+    sessionId: `overleaf-${now.toString(16)}`,
+    startedAt: new Date(origin).toISOString(),
+    source: "overleaf",
+    events: []
+  } : current;
+  session.source = "overleaf";
+  session.events.push(...events);
+  writeSession(dir, session);
+  return events.length;
+}
+function writeSessionAnchor(dir, anchor) {
+  const current = readSession(dir);
+  if (!current) return;
+  current.timeAnchor = { ...anchor, startedAt: current.startedAt };
+  writeSession(dir, current);
+}
+function startWatcher(dir) {
+  if (watcherAlive(dir)) return true;
+  const child = spawn(process.execPath, [...cliArgs(), "watch", "--dir", dir], {
+    cwd: dir,
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true
+  });
+  if (!child.pid) return false;
+  child.unref();
+  fs.mkdirSync(path.dirname(pidFile(dir)), { recursive: true });
+  fs.writeFileSync(pidFile(dir), `${child.pid}
+`);
+  return true;
+}
+function isManuscriptName(name) {
+  if (name.toLowerCase() === "readme.md") return false;
+  return TEXT.has(path.extname(name).toLowerCase());
+}
+function statePath(dir) {
+  return path.join(dir, ".zk-scribe", "private", "watch-state.json");
+}
+function pidFile(dir) {
+  return path.join(dir, ".zk-scribe", "private", "watch.pid");
+}
+function readState(dir) {
+  const file = statePath(dir);
+  if (!fs.existsSync(file)) return { files: {} };
+  const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+  return parsed && parsed.files ? parsed : { files: {} };
+}
+function writeState(dir, state) {
+  const file = statePath(dir);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(state)}
+`);
+}
+function writeSession(dir, session) {
+  const file = sessionPath(dir);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(session, null, 2)}
+`);
+}
+
+// src/time/drand.ts
+import https from "node:https";
+import tls from "node:tls";
+import { bls12_381 } from "@noble/curves/bls12-381.js";
+import { sha256 as sha2563 } from "@noble/hashes/sha2.js";
+import { hexToBytes as hexToBytes2 } from "@noble/hashes/utils.js";
+var QUICKNET = {
+  hash: "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+  publicKey: "83cf0f2896adee7eb8b5f01fcad3912212c437e0073e911fb90022d3e760183c8c4b450b6a0a6c3ac6a5776a2d1064510d1fec758c921cc22b0e17e63aaf4bcb5ed66304de9cf809bd274ca73bab4af5a6e9c76a4bc09e76eae8991ef5ece45a",
+  genesis: 1692803367,
+  period: 3,
+  scheme: "bls-unchained-g1-rfc9380"
+};
+var bls = bls12_381.shortSignatures;
+function roundUnix(round) {
+  return QUICKNET.genesis + (round - 1) * QUICKNET.period;
+}
+function roundAt(unixMs) {
+  const unix = Math.floor(unixMs / 1e3);
+  if (unix < QUICKNET.genesis) return 0;
+  return Math.floor((unix - QUICKNET.genesis) / QUICKNET.period) + 1;
+}
+function verifyRound(round) {
+  if (round.chain !== QUICKNET.hash || !Number.isInteger(round.round) || round.round < 1) return false;
+  if (!/^[0-9a-f]{96}$/.test(round.signature)) return false;
+  const bytes = new Uint8Array(8);
+  new DataView(bytes.buffer).setBigUint64(0, BigInt(round.round));
+  try {
+    const message = bls.hash(sha2563(bytes));
+    return bls.verify(hexToBytes2(round.signature), message, hexToBytes2(QUICKNET.publicKey));
+  } catch {
+    return false;
+  }
+}
+function coverageProblem(startRound, endRound, durationMs, startedAt) {
+  if (!Number.isInteger(startRound) || !Number.isInteger(endRound) || endRound <= startRound) {
+    return "Time beacon window is empty.";
+  }
+  const startMs = roundUnix(startRound) * 1e3;
+  const endMs = roundUnix(endRound) * 1e3;
+  const span = endMs - startMs + QUICKNET.period * 1e3;
+  if (span < durationMs) return "Time beacon window is shorter than the session.";
+  const started = Date.parse(startedAt);
+  if (!Number.isFinite(started)) return "Session start time is missing.";
+  if (started < startMs - QUICKNET.period * 1e3 || started > endMs + QUICKNET.period * 1e3) {
+    return "Session start is outside the time beacon window.";
+  }
+  return null;
+}
+function windowProblem(anchor, durationMs) {
+  if (anchor.scheme !== "drand-quicknet-v1") return "Unknown time anchor.";
+  if (anchor.start.chain !== anchor.end.chain) return "Time beacon chain does not match.";
+  if (!verifyRound(anchor.start) || !verifyRound(anchor.end)) return "Time beacon signature is invalid.";
+  return coverageProblem(anchor.start.round, anchor.end.round, durationMs, anchor.startedAt);
+}
+function chainDomain(anchor) {
+  return `${anchor.start.round}:${anchor.start.signature}:${anchor.end.round}:${anchor.end.signature}`;
+}
+async function fetchLatest() {
+  return fetchRoundNumber("latest");
+}
+async function fetchRound(round) {
+  if (!Number.isInteger(round) || round < 1) throw new Error("Time beacon round is invalid.");
+  const parsed = await fetchRoundNumber(String(round));
+  if (parsed.round !== round) throw new Error("Time beacon returned a different round.");
+  return parsed;
+}
+async function ensureAnchor(session) {
+  const duration = durationOf(session);
+  if (session.timeAnchor && session.timeAnchor.startedAt === session.startedAt && windowProblem(session.timeAnchor, duration) === null) {
+    return session;
+  }
+  const started = Date.parse(session.startedAt);
+  if (!Number.isFinite(started)) return clearAnchor(session);
+  const startRound = roundAt(started);
+  if (startRound < 1) return clearAnchor(session);
+  try {
+    const start2 = session.timeAnchor?.start && session.timeAnchor.start.round === startRound && verifyRound(session.timeAnchor.start) ? session.timeAnchor.start : await fetchRound(startRound);
+    let end = await fetchLatest();
+    let anchor = { scheme: "drand-quicknet-v1", startedAt: session.startedAt, start: start2, end };
+    for (let attempt = 0; attempt < 3 && needsAnotherRound(windowProblem(anchor, duration)); attempt += 1) {
+      await delay(QUICKNET.period * 1e3 + 400);
+      end = await fetchLatest();
+      anchor = { scheme: "drand-quicknet-v1", startedAt: session.startedAt, start: start2, end };
+    }
+    if (windowProblem(anchor, duration)) return clearAnchor(session);
+    return { ...session, timeAnchor: anchor };
+  } catch {
+    return clearAnchor(session);
+  }
+}
+async function fetchRoundNumber(round) {
+  const body = await getJson(`https://api.drand.sh/${QUICKNET.hash}/public/${round}`);
+  const parsed = {
+    chain: QUICKNET.hash,
+    round: Number(body.round),
+    signature: String(body.signature ?? "")
+  };
+  if (!verifyRound(parsed)) throw new Error("Time beacon signature did not verify.");
+  return parsed;
+}
+function durationOf(session) {
+  const events = session.events;
+  if (events.length === 0) return 0;
+  return events[events.length - 1].t - events[0].t;
+}
+function clearAnchor(session) {
+  if (!session.timeAnchor) return session;
+  const next = { ...session };
+  delete next.timeAnchor;
+  return next;
+}
+function getJson(url) {
+  const ca = tls.getCACertificates("system");
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, { ca }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => {
+        if ((response.statusCode ?? 500) >= 400) {
+          reject(new Error(`Time beacon responded ${response.statusCode}.`));
+          return;
+        }
+        try {
+          resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    request.setTimeout(8e3, () => request.destroy(new Error("Time beacon timed out.")));
+    request.on("error", reject);
+  });
+}
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function needsAnotherRound(problem) {
+  return problem === "Time beacon window is empty." || problem === "Time beacon window is shorter than the session.";
+}
+
+// src/capture/overleaf.ts
+var MAX_BODY = 8192;
+var MAX_CHANGES = 40;
+var MAX_SPAN = 1e5;
+function startOverleafBridge(dir) {
+  const root = path2.resolve(dir);
+  const token = randomBytes2(32).toString("hex");
+  let start2 = null;
+  let refreshing = false;
+  const refresh = async () => {
+    if (refreshing) return;
+    refreshing = true;
+    try {
+      if (!start2) start2 = await fetchLatest();
+      const end = await fetchLatest();
+      const session = readSession(root);
+      if (!session || session.events.length === 0) return;
+      const duration = session.events[session.events.length - 1].t - session.events[0].t;
+      const anchor = {
+        scheme: "drand-quicknet-v1",
+        startedAt: session.startedAt,
+        start: start2,
+        end
+      };
+      if (windowProblem(anchor, duration) === null) writeSessionAnchor(root, anchor);
+    } catch {
+    } finally {
+      refreshing = false;
+    }
+  };
+  return new Promise((resolve, reject) => {
+    const server = http.createServer((request, response) => {
+      if (request.method === "OPTIONS") {
+        response.writeHead(204, {
+          "access-control-allow-origin": "https://www.overleaf.com",
+          "access-control-allow-headers": "authorization, content-type",
+          "access-control-allow-methods": "POST, OPTIONS"
+        });
+        response.end();
+        return;
+      }
+      if (request.method !== "POST" || request.url !== "/events") {
+        response.writeHead(404);
+        response.end();
+        return;
+      }
+      if (!bearerMatches(request.headers.authorization, token)) {
+        response.writeHead(401);
+        response.end();
+        return;
+      }
+      readBody(request).then((raw) => {
+        const changes = changesFromWire(raw);
+        appendRemoteEdits(root, changes);
+        void refresh();
+        response.writeHead(204);
+        response.end();
+      }).catch(() => {
+        response.writeHead(400);
+        response.end();
+      });
+    });
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        reject(new Error("Overleaf bridge did not bind a local port."));
+        return;
+      }
+      writeBridgeFile(root, token, address.port);
+      const timer = setInterval(() => void refresh(), QUICKNET.period * 1e3);
+      void refresh();
+      resolve({
+        port: address.port,
+        token,
+        close: () => new Promise((done) => {
+          clearInterval(timer);
+          server.close(() => done());
+        })
+      });
+    });
+  });
+}
+function changesFromWire(raw) {
+  const parsed = JSON.parse(raw);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("bad");
+  const body = parsed;
+  if (Object.keys(body).some((key) => key !== "changes")) throw new Error("bad");
+  if (!Array.isArray(body.changes) || body.changes.length === 0 || body.changes.length > MAX_CHANGES) {
+    throw new Error("bad");
+  }
+  return body.changes.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("bad");
+    const change = item;
+    if (Object.keys(change).some((key) => key !== "removed" && key !== "len" && key !== "boundary")) {
+      throw new Error("bad");
+    }
+    const removed = change.removed ?? 0;
+    const len = change.len ?? 0;
+    if (!whole(removed) || !whole(len) || removed > MAX_SPAN || len > MAX_SPAN || removed === 0 && len === 0) {
+      throw new Error("bad");
+    }
+    const boundary = change.boundary === true;
+    const inserted = len === 0 ? "" : boundary ? `${"x".repeat(len - 1)}.` : "x".repeat(len);
+    return { removed, inserted };
+  });
+}
+function whole(value) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+function bearerMatches(header, token) {
+  const expected = Buffer.from(`Bearer ${token}`);
+  const given = Buffer.from(header ?? "");
+  if (expected.length !== given.length) return false;
+  return timingSafeEqual(expected, given);
+}
+function readBody(request) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    request.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > MAX_BODY) {
+        reject(new Error("bad"));
+        request.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    request.on("error", reject);
+  });
+}
+function writeBridgeFile(dir, token, port) {
+  const file = path2.join(dir, ".zk-scribe", "private", "overleaf.json");
+  fs2.mkdirSync(path2.dirname(file), { recursive: true });
+  fs2.writeFileSync(file, `${JSON.stringify({ token, port })}
+`, { mode: 384 });
+}
+
 // src/credit/taxonomy.ts
 var CREDIT_ROLES = [
   {
@@ -533,7 +1052,7 @@ function parseRevocationList(value) {
 // src/keys.ts
 import * as ed from "@noble/ed25519";
 import { sha512 } from "@noble/hashes/sha2.js";
-import { bytesToHex as bytesToHex3, hexToBytes as hexToBytes2 } from "@noble/hashes/utils.js";
+import { bytesToHex as bytesToHex3, hexToBytes as hexToBytes3 } from "@noble/hashes/utils.js";
 ed.hashes.sha512 = sha512;
 function generateAgentKey() {
   const { secretKey, publicKey } = ed.keygen();
@@ -565,7 +1084,7 @@ function decodeSignature(hex) {
   return decodeFixed(hex, 64, "Ed25519 signature");
 }
 function decodeFixed(hex, length, label) {
-  const bytes = hexToBytes2(hex);
+  const bytes = hexToBytes3(hex);
   if (bytes.length !== length) throw new Error(`Expected a ${length}-byte ${label}.`);
   return bytes;
 }
@@ -766,14 +1285,14 @@ function journalMessage(bodyHash) {
 
 // src/git/context.ts
 import { execFileSync } from "node:child_process";
-import path from "node:path";
+import path3 from "node:path";
 function detectContext(cwd, subject) {
   const inside = git(["rev-parse", "--is-inside-work-tree"], cwd) === "true";
   if (!inside) return { environment: "local", revision: "uncommitted", subject };
   const revision = git(["rev-parse", "HEAD"], cwd) ?? "uncommitted";
   const remotes = git(["remote", "-v"], cwd) ?? "";
   const environment = /overleaf/i.test(remotes) ? "overleaf-git" : "git";
-  return { environment, revision, subject: path.relative(cwd, subject) || subject };
+  return { environment, revision, subject: path3.relative(cwd, subject) || subject };
 }
 function git(args, cwd) {
   try {
@@ -814,16 +1333,16 @@ function reviewNote(contentHash, stat) {
 }
 
 // src/hash/tree.ts
-import { sha256 as sha2563 } from "@noble/hashes/sha2.js";
+import { sha256 as sha2564 } from "@noble/hashes/sha2.js";
 import { bytesToHex as bytesToHex4, concatBytes as concatBytes2 } from "@noble/hashes/utils.js";
 function hashTree(files) {
   const sorted = [...files].sort((left, right) => normalize(left.path).localeCompare(normalize(right.path)));
-  let state = sha2563(utf8("ZK-Scribe/tree/v1"));
+  let state = sha2564(utf8("ZK-Scribe/tree/v1"));
   for (const file of sorted) {
     const pathBytes = utf8(normalize(file.path));
     const length = new Uint8Array(4);
     new DataView(length.buffer).setUint32(0, file.bytes.length);
-    state = sha2563(concatBytes2(state, pathBytes, length, file.bytes));
+    state = sha2564(concatBytes2(state, pathBytes, length, file.bytes));
   }
   return bytesToHex4(state);
 }
@@ -1041,22 +1560,6 @@ function authorMessage(statementHash) {
   return `ZK-Scribe/author/v1:${statementHash}`;
 }
 
-// src/pop/constants.ts
-var PLANNING_PAUSE_MIN_MS = 1e3;
-var PLANNING_PAUSE_MAX_MS = 5e3;
-var PEAK_WINDOW_MS = 2e3;
-var BULK_INSERT_CHARS = 15;
-var MIN_COMPOSITION_DURATION_MS = 8e3;
-var MIN_COMPOSITION_INSERTS = 20;
-var FEATURE_KEYS = [
-  "medianIkiMs",
-  "ikiCvTimes100",
-  "planningPauses",
-  "boundaryPauses",
-  "peakCpsTimes10",
-  "revisionPermille"
-];
-
 // src/pop/regions.ts
 var REGIONS = {
   composition: {
@@ -1195,18 +1698,19 @@ function peakCharsPerSecondTimes10(inserts) {
 }
 
 // src/pop/swf.ts
-import { sha256 as sha2564 } from "@noble/hashes/sha2.js";
+import { sha256 as sha2565 } from "@noble/hashes/sha2.js";
 import { bytesToHex as bytesToHex5, concatBytes as concatBytes3 } from "@noble/hashes/utils.js";
-function sequentialWorkHead(session, contentHash) {
-  let state = sha2564(utf8(`ZK-Scribe/swf/v1|${session.sessionId}|${contentHash}`));
+function sequentialWorkHead(session, contentHash, domain) {
+  const label = domain ? `ZK-Scribe/swf/v1|${session.sessionId}|${contentHash}|${domain}` : `ZK-Scribe/swf/v1|${session.sessionId}|${contentHash}`;
+  let state = sha2565(utf8(label));
   session.events.forEach((event, index) => {
-    state = sha2564(concatBytes3(state, eventDigest(index, event)));
+    state = sha2565(concatBytes3(state, eventDigest(index, event)));
   });
   return bytesToHex5(state);
 }
 function eventDigest(index, event) {
   const boundary = event.boundary ? 1 : 0;
-  return sha2564(utf8(`${index}|${event.t}|${event.op}|${event.len}|${boundary}`));
+  return sha2565(utf8(`${index}|${event.t}|${event.op}|${event.len}|${boundary}`));
 }
 
 // src/pop/attest.ts
@@ -1252,8 +1756,19 @@ function attest(input) {
       throw new Error(`${role.name} cannot be process-attested. Pass --assert with the claim text.`);
     }
     extraction = extract(input.session);
+    if (input.session.timeAnchor) {
+      if (input.session.timeAnchor.startedAt !== input.session.startedAt) {
+        throw new Error("Time beacon does not match the session start.");
+      }
+      const problem = windowProblem(input.session.timeAnchor, extraction.durationMs);
+      if (problem) throw new Error(problem);
+    }
     label = extraction.label;
-    swfHead = sequentialWorkHead(input.session, input.contentHash);
+    swfHead = sequentialWorkHead(
+      input.session,
+      input.contentHash,
+      input.session.timeAnchor ? chainDomain(input.session.timeAnchor) : void 0
+    );
     sessionId = input.session.sessionId;
     counts = {
       eventCount: extraction.eventCount,
@@ -1317,6 +1832,7 @@ function attest(input) {
   if (grantHash !== void 0 && !/^[0-9a-f]{64}$/.test(grantHash)) {
     throw new Error("grantHash must be a sha256 hex digest.");
   }
+  const timeAnchor = input.session?.timeAnchor;
   const payload = signedPayload({
     action,
     agentPublicKey,
@@ -1325,7 +1841,8 @@ function attest(input) {
     commitments,
     rangeProofs,
     author,
-    grantHash
+    grantHash,
+    timeAnchor
   });
   const attestation = {
     version: "zk-scribe/0.1.0",
@@ -1339,7 +1856,8 @@ function attest(input) {
       signature: encodeKey(sign2(utf8(payload), input.agentSecretKey))
     },
     ...author ? { author } : {},
-    ...grantHash ? { grantHash } : {}
+    ...grantHash ? { grantHash } : {},
+    ...timeAnchor ? { timeAnchor } : {}
   };
   const witness = extraction ? {
     version: "zk-scribe-witness/0.1.0",
@@ -1389,7 +1907,8 @@ function verify2(attestation, options) {
       commitments: attestation.commitments,
       rangeProofs: attestation.rangeProofs,
       author: attestation.author,
-      grantHash: attestation.grantHash
+      grantHash: attestation.grantHash,
+      timeAnchor: attestation.timeAnchor
     });
     signatureValid = verifySignature(
       decodeSignature(attestation.cva.signature),
@@ -1397,6 +1916,10 @@ function verify2(attestation, options) {
       decodePublicKey(attestation.cva.agentPublicKey)
     );
     if (!signatureValid) reasons.push("Agent signature is invalid.");
+    if (attestation.timeAnchor) {
+      const problem = windowProblem(attestation.timeAnchor, attestation.statement.counts.durationMs);
+      if (problem) reasons.push(problem);
+    }
     if (attestation.author && !authorEndorsementValid(statementHash, attestation.author)) {
       reasons.push("Author endorsement does not match the statement.");
     }
@@ -1443,8 +1966,16 @@ function audit(attestation, session, witness) {
   if (session.sessionId !== attestation.statement.sessionId || witness.sessionId !== session.sessionId) {
     reasons.push("Session id does not match the attestation.");
   }
-  if (sequentialWorkHead(session, attestation.statement.contentHash) !== attestation.statement.swfHead) {
+  const domain = session.timeAnchor ? chainDomain(session.timeAnchor) : void 0;
+  if (sequentialWorkHead(session, attestation.statement.contentHash, domain) !== attestation.statement.swfHead) {
     reasons.push("Sequential work head does not match the session and content hash.");
+  }
+  if (canonicalHash(session.timeAnchor ?? null) !== canonicalHash(attestation.timeAnchor ?? null)) {
+    reasons.push("Time beacon does not match the session.");
+  }
+  if (session.timeAnchor) {
+    const problem = windowProblem(session.timeAnchor, extraction.durationMs);
+    if (problem) reasons.push(problem);
   }
   if (extraction.label !== attestation.statement.label) reasons.push("Recomputed label does not match.");
   const counts = attestation.statement.counts;
@@ -1572,6 +2103,7 @@ function signedPayload(body) {
   };
   if (body.author) payload.author = body.author;
   if (body.grantHash) payload.grantHash = body.grantHash;
+  if (body.timeAnchor) payload.timeAnchor = body.timeAnchor;
   return canonicalHash(payload);
 }
 function sameProofSystem(value) {
@@ -1771,202 +2303,33 @@ function finish(clock, sessionId) {
   };
 }
 
-// src/capture/watch.ts
-import { spawn } from "node:child_process";
-import fs from "node:fs";
-import path2 from "node:path";
-
-// src/capture/edits.ts
-function eventsFromEdit(before, after, t) {
-  if (before === after) return [];
-  let prefix = 0;
-  const maxPrefix = Math.min(before.length, after.length);
-  while (prefix < maxPrefix && before.charCodeAt(prefix) === after.charCodeAt(prefix)) prefix += 1;
-  let suffix = 0;
-  const maxSuffix = maxPrefix - prefix;
-  while (suffix < maxSuffix && before.charCodeAt(before.length - 1 - suffix) === after.charCodeAt(after.length - 1 - suffix)) {
-    suffix += 1;
-  }
-  const removed = before.length - prefix - suffix;
-  const added = after.length - prefix - suffix;
-  const events = [];
-  if (removed > 0) events.push({ t, op: "delete", len: removed });
-  if (added > 0) {
-    const chunk = after.slice(prefix, after.length - suffix);
-    const boundary = /[\s.!?]$/.test(chunk);
-    events.push({ t, op: "insert", len: added, ...boundary ? { boundary: true } : {} });
-  }
-  return events;
-}
-
-// src/entry.ts
-function cliArgs() {
-  const script = process.argv[1] ?? "";
-  if (script.endsWith(".ts")) return ["--experimental-strip-types", script];
-  return [script];
-}
-
-// src/capture/watch.ts
-var TEXT = /* @__PURE__ */ new Set([".md", ".markdown", ".tex", ".txt"]);
-var SKIP = /* @__PURE__ */ new Set([".git", ".zk-scribe", "node_modules", "output", "build", "dist"]);
-var MAX_CHARS = 2e6;
-function watchLabel(dir) {
-  return fs.existsSync(path2.join(dir, "content")) ? "content/" : "this directory";
-}
-function listManuscripts(dir) {
-  const content = path2.join(dir, "content");
-  const root = fs.existsSync(content) && fs.statSync(content).isDirectory() ? content : dir;
-  const files = [];
-  const walk = (folder) => {
-    for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
-      if (entry.name.startsWith(".") || SKIP.has(entry.name)) continue;
-      const full = path2.join(folder, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else if (isManuscriptName(entry.name)) files.push(full);
-    }
-  };
-  if (fs.existsSync(root)) walk(root);
-  return files;
-}
-function isManuscriptRelative(dir, relativePath) {
-  const normalized = relativePath.replaceAll("\\", "/");
-  if (!normalized || normalized.startsWith(".zk-scribe/") || normalized.split("/").some((part) => part.startsWith("."))) {
-    return false;
-  }
-  const base = normalized.slice(normalized.lastIndexOf("/") + 1);
-  if (!isManuscriptName(base)) return false;
-  const hasContent = fs.existsSync(path2.join(dir, "content"));
-  if (hasContent && !normalized.startsWith("content/")) return false;
-  return true;
-}
-function sessionPath(dir) {
-  return path2.join(dir, ".zk-scribe", "private", "session.json");
-}
-function readSession(dir) {
-  const file = sessionPath(dir);
-  if (!fs.existsSync(file)) return null;
-  const session = JSON.parse(fs.readFileSync(file, "utf8"));
-  if (!Array.isArray(session.events) || session.events.length === 0) return null;
-  return session;
-}
-function rotateSession(dir) {
-  const file = sessionPath(dir);
-  if (fs.existsSync(file)) fs.rmSync(file);
-}
-function scanOnce(dir, now = Date.now()) {
-  const state = readState(dir);
-  const current = readSession(dir);
-  const started = current ? Date.parse(current.startedAt) : now;
-  let t = Math.max(0, now - (Number.isFinite(started) ? started : now));
-  if (current && current.events.length > 0) t = Math.max(t, current.events[current.events.length - 1].t);
-  const next = {};
-  const events = [];
-  for (const file of listManuscripts(dir)) {
-    const relative = path2.relative(dir, file).replaceAll("\\", "/");
-    const text = fs.readFileSync(file, "utf8");
-    if (text.length > MAX_CHARS) continue;
-    next[relative] = text;
-    const before = state.files[relative];
-    if (before === void 0) continue;
-    const delta = eventsFromEdit(before, text, t);
-    if (delta.length === 0) continue;
-    events.push(...delta);
-    t += 1;
-  }
-  writeState(dir, { files: next });
-  if (events.length === 0) return 0;
-  const session = current ?? {
-    sessionId: `watch-${now.toString(16)}`,
-    startedAt: new Date(now).toISOString(),
-    events: []
-  };
-  session.events.push(...events);
-  writeSession(dir, session);
-  return events.length;
-}
-function watcherAlive(dir) {
-  const file = pidFile(dir);
-  if (!fs.existsSync(file)) return false;
-  const pid = Number(fs.readFileSync(file, "utf8").trim());
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-function startWatcher(dir) {
-  if (watcherAlive(dir)) return true;
-  const child = spawn(process.execPath, [...cliArgs(), "watch", "--dir", dir], {
-    cwd: dir,
-    detached: true,
-    stdio: "ignore",
-    windowsHide: true
-  });
-  if (!child.pid) return false;
-  child.unref();
-  fs.mkdirSync(path2.dirname(pidFile(dir)), { recursive: true });
-  fs.writeFileSync(pidFile(dir), `${child.pid}
-`);
-  return true;
-}
-function isManuscriptName(name) {
-  if (name.toLowerCase() === "readme.md") return false;
-  return TEXT.has(path2.extname(name).toLowerCase());
-}
-function statePath(dir) {
-  return path2.join(dir, ".zk-scribe", "private", "watch-state.json");
-}
-function pidFile(dir) {
-  return path2.join(dir, ".zk-scribe", "private", "watch.pid");
-}
-function readState(dir) {
-  const file = statePath(dir);
-  if (!fs.existsSync(file)) return { files: {} };
-  const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-  return parsed && parsed.files ? parsed : { files: {} };
-}
-function writeState(dir, state) {
-  const file = statePath(dir);
-  fs.mkdirSync(path2.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify(state)}
-`);
-}
-function writeSession(dir, session) {
-  const file = sessionPath(dir);
-  fs.mkdirSync(path2.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify(session, null, 2)}
-`);
-}
-
 // src/git/hook.ts
 import { execFileSync as execFileSync2, spawnSync } from "node:child_process";
-import fs2 from "node:fs";
-import path3 from "node:path";
+import fs3 from "node:fs";
+import path4 from "node:path";
 var BEGIN = "# zk-scribe-hook";
 var END = "# zk-scribe-hook-end";
 var IGNORE = [".zk-scribe/private/", "*.witness.json"];
 function ensureLocalIgnore(dir) {
-  const file = path3.join(dir, ".gitignore");
-  const current = fs2.existsSync(file) ? fs2.readFileSync(file, "utf8") : "";
+  const file = path4.join(dir, ".gitignore");
+  const current = fs3.existsSync(file) ? fs3.readFileSync(file, "utf8") : "";
   const missing = IGNORE.filter((line) => !current.split(/\r?\n/).includes(line));
   if (missing.length === 0) return;
   const prefix = current.length === 0 || current.endsWith("\n") ? current : `${current}
 `;
-  fs2.writeFileSync(file, `${prefix}${missing.join("\n")}
+  fs3.writeFileSync(file, `${prefix}${missing.join("\n")}
 `);
 }
 function installCommitHook(dir) {
   const hooks = hooksDirectory(dir);
   if (!hooks) return false;
-  fs2.mkdirSync(hooks, { recursive: true });
-  const target = path3.join(hooks, "pre-commit");
+  fs3.mkdirSync(hooks, { recursive: true });
+  const target = path4.join(hooks, "pre-commit");
   const block = hookBlock(dir);
-  const existing = fs2.existsSync(target) ? fs2.readFileSync(target, "utf8") : "";
+  const existing = fs3.existsSync(target) ? fs3.readFileSync(target, "utf8") : "";
   const next = existing.includes(BEGIN) ? existing.replace(hookPattern(), block) : joinHook(existing, block);
-  fs2.writeFileSync(target, next);
-  fs2.chmodSync(target, 493);
+  fs3.writeFileSync(target, next);
+  fs3.chmodSync(target, 493);
   return true;
 }
 function runCommitHook(dir) {
@@ -1991,10 +2354,10 @@ function runCommitHook(dir) {
   }
 }
 function attestFile(dir, relative, sessionFile) {
-  const privateOut = path3.join(dir, ".zk-scribe", "private", "last-attestation.json");
-  const privateWitness = path3.join(dir, ".zk-scribe", "private", "last-attestation.witness.json");
-  if (fs2.existsSync(privateOut)) fs2.rmSync(privateOut);
-  if (fs2.existsSync(privateWitness)) fs2.rmSync(privateWitness);
+  const privateOut = path4.join(dir, ".zk-scribe", "private", "last-attestation.json");
+  const privateWitness = path4.join(dir, ".zk-scribe", "private", "last-attestation.witness.json");
+  if (fs3.existsSync(privateOut)) fs3.rmSync(privateOut);
+  if (fs3.existsSync(privateWitness)) fs3.rmSync(privateWitness);
   spawnSync(
     process.execPath,
     [
@@ -2005,22 +2368,22 @@ function attestFile(dir, relative, sessionFile) {
       "--file",
       relative,
       "--session",
-      path3.relative(dir, sessionFile),
+      path4.relative(dir, sessionFile),
       "--out",
-      path3.join(".zk-scribe", "private", "last-attestation.json")
+      path4.join(".zk-scribe", "private", "last-attestation.json")
     ],
     { cwd: dir, encoding: "utf8" }
   );
-  if (!fs2.existsSync(privateOut)) return false;
-  const attestation = JSON.parse(fs2.readFileSync(privateOut, "utf8"));
+  if (!fs3.existsSync(privateOut)) return false;
+  const attestation = JSON.parse(fs3.readFileSync(privateOut, "utf8"));
   const subject = attestation.statement.context.subject.replaceAll("\\", "/");
   if (subject !== relative.replaceAll("\\", "/")) return false;
-  const output = path3.join(dir, "attestation.json");
-  fs2.copyFileSync(privateOut, output);
+  const output = path4.join(dir, "attestation.json");
+  fs3.copyFileSync(privateOut, output);
   const name = ledgerName(attestation);
-  const ledger = path3.join(dir, ".zk-scribe", "ledger", name);
-  fs2.mkdirSync(path3.dirname(ledger), { recursive: true });
-  fs2.copyFileSync(privateOut, ledger);
+  const ledger = path4.join(dir, ".zk-scribe", "ledger", name);
+  fs3.mkdirSync(path4.dirname(ledger), { recursive: true });
+  fs3.copyFileSync(privateOut, ledger);
   return true;
 }
 function writeCommitSession(dir, relative) {
@@ -2034,27 +2397,27 @@ function writeCommitSession(dir, relative) {
     startedAt: (/* @__PURE__ */ new Date()).toISOString(),
     events
   };
-  const file = path3.join(dir, ".zk-scribe", "private", "commit-session.json");
-  fs2.mkdirSync(path3.dirname(file), { recursive: true });
-  fs2.writeFileSync(file, `${JSON.stringify(session, null, 2)}
+  const file = path4.join(dir, ".zk-scribe", "private", "commit-session.json");
+  fs3.mkdirSync(path4.dirname(file), { recursive: true });
+  fs3.writeFileSync(file, `${JSON.stringify(session, null, 2)}
 `);
   return file;
 }
 function stagePublic(dir) {
-  const ledger = path3.join(dir, ".zk-scribe", "ledger");
+  const ledger = path4.join(dir, ".zk-scribe", "ledger");
   const paths = [
     ".gitignore",
     "attestation.json",
-    path3.join(".zk-scribe", "agent.public.json"),
-    path3.join(".zk-scribe", "policy.json"),
-    path3.join(".zk-scribe", "config.json")
+    path4.join(".zk-scribe", "agent.public.json"),
+    path4.join(".zk-scribe", "policy.json"),
+    path4.join(".zk-scribe", "config.json")
   ];
-  if (fs2.existsSync(ledger)) {
-    for (const name of fs2.readdirSync(ledger)) {
-      if (name.endsWith(".json")) paths.push(path3.join(".zk-scribe", "ledger", name));
+  if (fs3.existsSync(ledger)) {
+    for (const name of fs3.readdirSync(ledger)) {
+      if (name.endsWith(".json")) paths.push(path4.join(".zk-scribe", "ledger", name));
     }
   }
-  const present = paths.filter((file) => fs2.existsSync(path3.join(dir, file)));
+  const present = paths.filter((file) => fs3.existsSync(path4.join(dir, file)));
   if (present.length === 0) return;
   try {
     execFileSync2("git", ["add", "--", ...present], { cwd: dir, stdio: "ignore" });
@@ -2083,7 +2446,7 @@ function hooksDirectory(dir) {
       stdio: ["ignore", "pipe", "ignore"]
     }).trim();
     if (!relative) return null;
-    return path3.resolve(dir, relative);
+    return path4.resolve(dir, relative);
   } catch {
     return null;
   }
@@ -2091,7 +2454,7 @@ function hooksDirectory(dir) {
 function hookBlock(dir) {
   const node = process.execPath.replaceAll("\\", "/");
   const args = cliArgs().map((arg) => `"${arg.replaceAll("\\", "/")}"`).join(" ");
-  const root = path3.resolve(dir).replaceAll("\\", "/");
+  const root = path4.resolve(dir).replaceAll("\\", "/");
   return `${BEGIN}
 "${node}" ${args} hook --dir "${root}" >/dev/null 2>&1 || true
 ${END}
@@ -2118,18 +2481,18 @@ function ledgerName(attestation) {
   return `${hash}-${session}.json`;
 }
 function log(dir, line) {
-  const file = path3.join(dir, ".zk-scribe", "private", "hook.log");
-  fs2.mkdirSync(path3.dirname(file), { recursive: true });
-  fs2.appendFileSync(file, `${(/* @__PURE__ */ new Date()).toISOString()} ${line}
+  const file = path4.join(dir, ".zk-scribe", "private", "hook.log");
+  fs3.mkdirSync(path4.dirname(file), { recursive: true });
+  fs3.appendFileSync(file, `${(/* @__PURE__ */ new Date()).toISOString()} ${line}
 `);
 }
 
 // src/status.ts
-import fs3 from "node:fs";
-import path4 from "node:path";
+import fs4 from "node:fs";
+import path5 from "node:path";
 function statusCounts(dir) {
-  const root = path4.join(dir, ".zk-scribe");
-  const initialized = fs3.existsSync(path4.join(root, "private", "agent.seed"));
+  const root = path5.join(dir, ".zk-scribe");
+  const initialized = fs4.existsSync(path5.join(root, "private", "agent.seed"));
   const counts = {
     initialized,
     watching: initialized && watcherAlive(dir),
@@ -2177,13 +2540,13 @@ function statusText(counts) {
 `;
 }
 function loadAttestations(dir) {
-  const ledger = path4.join(dir, ".zk-scribe", "ledger");
-  if (!fs3.existsSync(ledger)) return [];
+  const ledger = path5.join(dir, ".zk-scribe", "ledger");
+  if (!fs4.existsSync(ledger)) return [];
   const found = [];
-  for (const name of fs3.readdirSync(ledger)) {
+  for (const name of fs4.readdirSync(ledger)) {
     if (!name.endsWith(".json")) continue;
     try {
-      found.push(JSON.parse(fs3.readFileSync(path4.join(ledger, name), "utf8")));
+      found.push(JSON.parse(fs4.readFileSync(path5.join(ledger, name), "utf8")));
     } catch {
       continue;
     }
@@ -2200,6 +2563,7 @@ Usage:
   zk-scribe status [--dir .]
   zk-scribe example --kind composition|transcription|automated|paste --out session.json
   zk-scribe record --out session.json
+  zk-scribe overleaf [--dir .]
   zk-scribe attest --file manuscript.md [--role <credit-role>] [--session session.json] [--assert "claim"] [--author-seed author.seed] [--grant grant.json] [--out attestation.json]
   zk-scribe verify <attestation.json> [--require process|process-proven] [--require-author] [--require-grant] [--grant grant.json] [--agent-key hex] [--policy policy.json]
   A .zk-scribe/revoked.json list, when present, refuses those agent keys.
@@ -2233,10 +2597,11 @@ function main(argv) {
   if (command === "init") return init(String(flags.dir ?? "."), flags.force === true);
   if (command === "status") return statusCommand(flags);
   if (command === "watch") return watchCommand(flags);
-  if (command === "hook") return runCommitHook(path5.resolve(String(flags.dir ?? ".")));
+  if (command === "hook") return runCommitHook(path6.resolve(String(flags.dir ?? ".")));
   if (command === "example") return example(flags);
   if (command === "record") return void record(String(flags.out ?? "session.json")).catch(fail);
-  if (command === "attest") return attestCommand(flags);
+  if (command === "overleaf") return void overleafCommand(flags).catch(fail);
+  if (command === "attest") return void attestCommand(flags).catch((error) => fail(error, 2));
   if (command === "verify") return verifyCommand(flags, positionals);
   if (command === "audit") return auditCommand(flags);
   if (command === "export") return exportCommand(flags, positionals);
@@ -2262,29 +2627,29 @@ function main(argv) {
 ${HELP}`);
 }
 function init(dir, force) {
-  const rootDir = path5.resolve(dir);
-  const root = path5.join(rootDir, ".zk-scribe");
-  const seedPath = path5.join(root, "private", "agent.seed");
-  const publicPath = path5.join(root, "agent.public.json");
-  fs4.mkdirSync(path5.dirname(seedPath), { recursive: true });
-  const kept = fs4.existsSync(seedPath) && !force;
+  const rootDir = path6.resolve(dir);
+  const root = path6.join(rootDir, ".zk-scribe");
+  const seedPath = path6.join(root, "private", "agent.seed");
+  const publicPath = path6.join(root, "agent.public.json");
+  fs5.mkdirSync(path6.dirname(seedPath), { recursive: true });
+  const kept = fs5.existsSync(seedPath) && !force;
   if (!kept) {
     const key = generateAgentKey();
-    fs4.writeFileSync(seedPath, `${encodeKey(key.secretKey)}
+    fs5.writeFileSync(seedPath, `${encodeKey(key.secretKey)}
 `);
-    fs4.writeFileSync(publicPath, publicKeyFile(encodeKey(key.publicKey)));
-  } else if (!fs4.existsSync(publicPath)) {
-    const secret = decodeSecretKey(fs4.readFileSync(seedPath, "utf8").trim());
-    fs4.writeFileSync(publicPath, publicKeyFile(encodeKey(publicKeyFromSecret(secret))));
+    fs5.writeFileSync(publicPath, publicKeyFile(encodeKey(key.publicKey)));
+  } else if (!fs5.existsSync(publicPath)) {
+    const secret = decodeSecretKey(fs5.readFileSync(seedPath, "utf8").trim());
+    fs5.writeFileSync(publicPath, publicKeyFile(encodeKey(publicKeyFromSecret(secret))));
   }
-  const policyPath = path5.join(root, "policy.json");
-  if (!fs4.existsSync(policyPath) || force) {
-    fs4.writeFileSync(policyPath, `${JSON.stringify(defaultPolicy(), null, 2)}
+  const policyPath = path6.join(root, "policy.json");
+  if (!fs5.existsSync(policyPath) || force) {
+    fs5.writeFileSync(policyPath, `${JSON.stringify(defaultPolicy(), null, 2)}
 `);
   }
-  const configPath = path5.join(root, "config.json");
-  if (!fs4.existsSync(configPath) || force) {
-    fs4.writeFileSync(configPath, `${JSON.stringify(defaultConfig(), null, 2)}
+  const configPath = path6.join(root, "config.json");
+  if (!fs5.existsSync(configPath) || force) {
+    fs5.writeFileSync(configPath, `${JSON.stringify(defaultConfig(), null, 2)}
 `);
   }
   ensureLocalIgnore(rootDir);
@@ -2303,13 +2668,13 @@ function publicKeyFile(publicKey) {
 `;
 }
 function statusCommand(flags) {
-  process.stdout.write(statusText(statusCounts(path5.resolve(String(flags.dir ?? ".")))));
+  process.stdout.write(statusText(statusCounts(path6.resolve(String(flags.dir ?? ".")))));
 }
 function watchCommand(flags) {
-  const dir = path5.resolve(String(flags.dir ?? "."));
-  const pid = path5.join(dir, ".zk-scribe", "private", "watch.pid");
-  fs4.mkdirSync(path5.dirname(pid), { recursive: true });
-  fs4.writeFileSync(pid, `${process.pid}
+  const dir = path6.resolve(String(flags.dir ?? "."));
+  const pid = path6.join(dir, ".zk-scribe", "private", "watch.pid");
+  fs5.mkdirSync(path6.dirname(pid), { recursive: true });
+  fs5.writeFileSync(pid, `${process.pid}
 `);
   const tick = () => {
     try {
@@ -2333,22 +2698,30 @@ function example(flags) {
   }
   const out = String(flags.out ?? "");
   if (!out) throw new Error("Pass --out for the session log.");
-  fs4.mkdirSync(path5.dirname(path5.resolve(out)), { recursive: true });
-  fs4.writeFileSync(out, `${JSON.stringify(synthesizeSession(kind), null, 2)}
+  fs5.mkdirSync(path6.dirname(path6.resolve(out)), { recursive: true });
+  fs5.writeFileSync(out, `${JSON.stringify(synthesizeSession(kind), null, 2)}
 `);
   process.stdout.write(`Wrote ${out}
 `);
 }
-function attestCommand(flags) {
+async function attestCommand(flags) {
   const dir = projectDir(flags);
   const file = resolveIn(dir, required(flags, "file"));
   const role = roleFor(dir, flags);
   const out = resolveIn(dir, String(flags.out ?? "attestation.json"));
   const policy = loadPolicy(dir, flags.policy);
   const secret = loadSecret(dir);
-  const contentHash = sha256Hex(fs4.readFileSync(file));
+  const contentHash = sha256Hex(fs5.readFileSync(file));
   const assertion = flags.assert === void 0 ? void 0 : String(flags.assert);
-  const session = flags.session ? readJson(resolveIn(dir, String(flags.session))) : void 0;
+  const sessionFile = flags.session ? resolveIn(dir, String(flags.session)) : "";
+  let session = sessionFile ? readJson(sessionFile) : void 0;
+  if (session && (session.source === "record" || session.source === "overleaf" || session.source === "editor")) {
+    const sealed = await ensureAnchor(session);
+    if (canonicalHash(sealed.timeAnchor ?? null) !== canonicalHash(session.timeAnchor ?? null)) {
+      writeJson(sessionFile, sealed);
+    }
+    session = sealed;
+  }
   const context = contextFrom(flags, dir, file);
   const grantHash = applyGovernance(dir, flags, policy, assertedAction(flags), contentHash);
   const { attestation, witness } = attest({
@@ -2375,13 +2748,13 @@ function attestCommand(flags) {
 }
 function roleFor(dir, flags) {
   if (typeof flags.role === "string" && flags.role.trim() !== "") return flags.role;
-  const configPath = path5.join(dir, ".zk-scribe", "config.json");
-  if (!fs4.existsSync(configPath)) throw new Error("Pass --role, or add defaultRole to .zk-scribe/config.json.");
-  return parseConfig(JSON.parse(fs4.readFileSync(configPath, "utf8"))).defaultRole;
+  const configPath = path6.join(dir, ".zk-scribe", "config.json");
+  if (!fs5.existsSync(configPath)) throw new Error("Pass --role, or add defaultRole to .zk-scribe/config.json.");
+  return parseConfig(JSON.parse(fs5.readFileSync(configPath, "utf8"))).defaultRole;
 }
 function authorSeed(dir, value) {
   if (typeof value !== "string") return void 0;
-  return decodeSecretKey(fs4.readFileSync(resolveIn(dir, value), "utf8").trim());
+  return decodeSecretKey(fs5.readFileSync(resolveIn(dir, value), "utf8").trim());
 }
 function verifyCommand(flags, positionals) {
   const project = projectDir(flags);
@@ -2407,9 +2780,9 @@ function verifyCommand(flags, positionals) {
   if (!result.ok) process.exitCode = 1;
 }
 function loadRevokedKeys(dir) {
-  const file = path5.join(dir, ".zk-scribe", "revoked.json");
-  if (!fs4.existsSync(file)) return void 0;
-  return parseRevocationList(JSON.parse(fs4.readFileSync(file, "utf8")));
+  const file = path6.join(dir, ".zk-scribe", "revoked.json");
+  if (!fs5.existsSync(file)) return void 0;
+  return parseRevocationList(JSON.parse(fs5.readFileSync(file, "utf8")));
 }
 function auditCommand(flags) {
   const attestation = readJson(required(flags, "attestation"));
@@ -2445,7 +2818,7 @@ function exportCommand(flags, positionals) {
       throw new Error("Policy does not allow export.jats.");
     }
     const out = String(flags.out ?? "attestation.jats.xml");
-    fs4.writeFileSync(out, toJats(attestation));
+    fs5.writeFileSync(out, toJats(attestation));
     process.stdout.write(`Wrote ${out}
 `);
     return;
@@ -2465,7 +2838,7 @@ function exportCommand(flags, positionals) {
       throw new Error("Policy does not allow export.manifest.");
     }
     const out = String(flags.out ?? "attestation.html");
-    fs4.writeFileSync(out, toHtmlReport(attestation));
+    fs5.writeFileSync(out, toHtmlReport(attestation));
     process.stdout.write(`Wrote ${out}
 `);
     return;
@@ -2508,10 +2881,10 @@ function grantCommand(flags) {
     agentPublicKey: loadTrustedKey(dir, flags["agent-key"]),
     policy: loadPolicy(dir, flags.policy),
     actions,
-    contentHash: sha256Hex(fs4.readFileSync(resolveIn(dir, required(flags, "file")))),
+    contentHash: sha256Hex(fs5.readFileSync(resolveIn(dir, required(flags, "file")))),
     authorSecretKey: author
   });
-  const out = resolveIn(dir, String(flags.out ?? path5.join(".zk-scribe", "grant.json")));
+  const out = resolveIn(dir, String(flags.out ?? path6.join(".zk-scribe", "grant.json")));
   writeJson(out, grant);
   process.stdout.write(`Wrote ${out}
 `);
@@ -2519,7 +2892,7 @@ function grantCommand(flags) {
 function governCommand(flags) {
   const dir = projectDir(flags);
   const policy = loadPolicy(dir, flags.policy);
-  const contentHash = sha256Hex(fs4.readFileSync(resolveIn(dir, required(flags, "file"))));
+  const contentHash = sha256Hex(fs5.readFileSync(resolveIn(dir, required(flags, "file"))));
   const decision = decideAndRecord(dir, flags, policy, required(flags, "action"), contentHash);
   process.stdout.write(`${JSON.stringify(decision, null, 2)}
 `);
@@ -2566,29 +2939,29 @@ function decideAndRecord(dir, flags, policy, action, contentHash) {
 }
 function readGovernedGrant(dir, flags) {
   if (typeof flags.grant === "string") return parseGrant(readJson(resolveIn(dir, flags.grant)));
-  const fallback = path5.join(dir, ".zk-scribe", "grant.json");
-  if (!fs4.existsSync(fallback)) return void 0;
+  const fallback = path6.join(dir, ".zk-scribe", "grant.json");
+  if (!fs5.existsSync(fallback)) return void 0;
   return parseGrant(readJson(fallback));
 }
 function journalFile(dir) {
-  return path5.join(dir, ".zk-scribe", "private", "journal.jsonl");
+  return path6.join(dir, ".zk-scribe", "private", "journal.jsonl");
 }
 function readJournal(dir) {
   const file = journalFile(dir);
-  if (!fs4.existsSync(file)) return [];
-  return fs4.readFileSync(file, "utf8").split(/\r?\n/).filter((line) => line.trim() !== "").map((line) => parseJournalEntry(JSON.parse(line)));
+  if (!fs5.existsSync(file)) return [];
+  return fs5.readFileSync(file, "utf8").split(/\r?\n/).filter((line) => line.trim() !== "").map((line) => parseJournalEntry(JSON.parse(line)));
 }
 function writeJournal(dir, entries) {
   const file = journalFile(dir);
-  fs4.mkdirSync(path5.dirname(file), { recursive: true });
+  fs5.mkdirSync(path6.dirname(file), { recursive: true });
   const body = entries.map((entry) => JSON.stringify(entry)).join("\n");
-  fs4.writeFileSync(file, body.length === 0 ? "" : `${body}
+  fs5.writeFileSync(file, body.length === 0 ? "" : `${body}
 `);
 }
 function diffstatCommand(flags, positionals) {
   const target = positionals[0];
   if (!target) throw new Error("Pass a unified diff file.");
-  const diff = fs4.readFileSync(resolveIn(projectDir(flags), target), "utf8");
+  const diff = fs5.readFileSync(resolveIn(projectDir(flags), target), "utf8");
   const stat = parseDiffStat(diff);
   const contentHash = flags["content-hash"];
   const body = typeof contentHash === "string" ? reviewNote(contentHash, stat) : stat;
@@ -2627,21 +3000,21 @@ function hashCommand(flags, positionals) {
   const target = positionals[0];
   if (!target) throw new Error("Pass a file or directory to hash.");
   const full = resolveIn(projectDir(flags), target);
-  if (!fs4.existsSync(full)) throw new Error(`Nothing found at ${full}.`);
-  const stat = fs4.statSync(full);
-  const files = stat.isDirectory() ? collectTree(full) : [{ path: path5.basename(full), bytes: fs4.readFileSync(full) }];
+  if (!fs5.existsSync(full)) throw new Error(`Nothing found at ${full}.`);
+  const stat = fs5.statSync(full);
+  const files = stat.isDirectory() ? collectTree(full) : [{ path: path6.basename(full), bytes: fs5.readFileSync(full) }];
   process.stdout.write(`${hashTree(files)}
 `);
 }
 function collectTree(root) {
   const files = [];
   const walk = (dir) => {
-    for (const entry of fs4.readdirSync(dir, { withFileTypes: true })) {
-      const full = path5.join(dir, entry.name);
-      const relative = path5.relative(root, full);
+    for (const entry of fs5.readdirSync(dir, { withFileTypes: true })) {
+      const full = path6.join(dir, entry.name);
+      const relative = path6.relative(root, full);
       if (ignoredTreePath(relative)) continue;
       if (entry.isDirectory()) walk(full);
-      else if (entry.isFile()) files.push({ path: relative, bytes: fs4.readFileSync(full) });
+      else if (entry.isFile()) files.push({ path: relative, bytes: fs5.readFileSync(full) });
     }
   };
   walk(root);
@@ -2649,14 +3022,14 @@ function collectTree(root) {
 }
 function doctorCommand(flags) {
   const dir = projectDir(flags);
-  const root = path5.join(dir, ".zk-scribe");
+  const root = path6.join(dir, ".zk-scribe");
   const major = Number(process.versions.node.split(".")[0]);
   const report = doctorReport({
     nodeMajor: major,
     minimumMajor: 22,
-    policyExists: fs4.existsSync(path5.join(root, "policy.json")),
-    publicKeyExists: fs4.existsSync(path5.join(root, "agent.public.json")),
-    seedExists: fs4.existsSync(path5.join(root, "private", "agent.seed"))
+    policyExists: fs5.existsSync(path6.join(root, "policy.json")),
+    publicKeyExists: fs5.existsSync(path6.join(root, "agent.public.json")),
+    seedExists: fs5.existsSync(path6.join(root, "private", "agent.seed"))
   });
   process.stdout.write(`${JSON.stringify(report, null, 2)}
 `);
@@ -2681,17 +3054,48 @@ function credit() {
 `);
   }
 }
-function record(out) {
-  if (!process.stdin.isTTY || typeof process.stdin.setRawMode !== "function") {
-    return Promise.reject(new Error("record needs an interactive terminal."));
+async function overleafCommand(flags) {
+  const dir = projectDir(flags);
+  if (!fs5.existsSync(path6.join(dir, ".zk-scribe", "config.json"))) {
+    throw new Error("Run zk-scribe init in this repository.");
   }
-  return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin });
-    readline.emitKeypressEvents(process.stdin, rl);
-    process.stdin.setRawMode(true);
-    const started = Date.now();
-    const events = [];
-    let text = "";
+  const bridge = await startOverleafBridge(dir);
+  const folder = path6.resolve(path6.dirname(fileURLToPath(import.meta.url)), "..", "editors", "overleaf");
+  process.stdout.write(`Overleaf bridge listening on 127.0.0.1:${bridge.port}
+`);
+  process.stdout.write(`Token ${bridge.token}
+`);
+  process.stdout.write(`Load the unpacked extension from ${folder}
+`);
+  process.stdout.write("Paste the port and token into the extension options. The bridge stores edit lengths only.\n");
+  process.stdout.write("Ctrl+C stops the bridge.\n");
+  await new Promise((resolve) => {
+    const stop = () => {
+      void bridge.close().then(() => resolve());
+    };
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
+  });
+}
+async function record(out) {
+  if (!process.stdin.isTTY || typeof process.stdin.setRawMode !== "function") {
+    throw new Error("record needs an interactive terminal.");
+  }
+  let beaconStart = null;
+  try {
+    beaconStart = await fetchLatest();
+  } catch {
+    beaconStart = null;
+  }
+  const started = Date.now();
+  const startedAt = new Date(started).toISOString();
+  const events = [];
+  let text = "";
+  const rl = readline.createInterface({ input: process.stdin });
+  readline.emitKeypressEvents(process.stdin, rl);
+  process.stdin.setRawMode(true);
+  process.stdout.write("Timing keystrokes. Typed text stays on screen and is not saved.\nCtrl+D writes the timing log. Ctrl+C discards it.\n");
+  const finished = await new Promise((resolve) => {
     const cleanup = () => {
       process.stdin.setRawMode(false);
       process.stdin.off("keypress", onKey);
@@ -2701,25 +3105,12 @@ function record(out) {
       const step = eventFromKey({ ...key, sequence: key.sequence || str }, Date.now() - started);
       if (step.kind === "abort") {
         cleanup();
-        process.stdout.write("\nDiscarded. Nothing was written.\n");
-        process.exitCode = 1;
-        resolve();
+        resolve("discard");
         return;
       }
       if (step.kind === "finish") {
         cleanup();
-        const session = {
-          sessionId: `rec-${started.toString(16)}`,
-          startedAt: new Date(started).toISOString(),
-          events
-        };
-        writeJson(out, session);
-        process.stdout.write(`
-Saved ${events.length} timing events to ${out}
-`);
-        process.stdout.write(`Local buffer hash ${sha256Hex(utf8(text))} (the text was not written)
-`);
-        resolve();
+        resolve("save");
         return;
       }
       if (step.kind === "event") {
@@ -2730,17 +3121,61 @@ Saved ${events.length} timing events to ${out}
       }
     };
     process.stdin.on("keypress", onKey);
-    process.stdout.write("Timing keystrokes. Typed text stays on screen and is not saved.\nCtrl+D writes the timing log. Ctrl+C discards it.\n");
   });
+  if (finished === "discard") {
+    process.stdout.write("\nDiscarded. Nothing was written.\n");
+    process.exitCode = 1;
+    return;
+  }
+  const session = {
+    sessionId: `rec-${started.toString(16)}`,
+    startedAt,
+    source: "record",
+    events
+  };
+  const duration = events.length === 0 ? 0 : events[events.length - 1].t - events[0].t;
+  if (!beaconStart) {
+    process.stdout.write("Time beacon was unavailable. The log was saved without a wall-clock window.\n");
+  } else {
+    try {
+      let end = await fetchLatest();
+      const deadline = Date.now() + QUICKNET.period * 1e3 * 3 + 500;
+      let anchor = { scheme: "drand-quicknet-v1", startedAt, start: beaconStart, end };
+      while (needsAnotherRound(windowProblem(anchor, duration)) && Date.now() < deadline) {
+        await delay2(QUICKNET.period * 1e3 + 200);
+        end = await fetchLatest();
+        anchor = { scheme: "drand-quicknet-v1", startedAt, start: beaconStart, end };
+      }
+      const problem = windowProblem(anchor, duration);
+      if (problem) process.stdout.write(`${problem} The log was saved without a time beacon.
+`);
+      else session.timeAnchor = anchor;
+    } catch {
+      process.stdout.write("Time beacon was unavailable. The log was saved without a wall-clock window.\n");
+    }
+  }
+  writeJson(out, session);
+  process.stdout.write(`
+Saved ${events.length} timing events to ${out}
+`);
+  process.stdout.write(`Local buffer hash ${sha256Hex(utf8(text))} (the text was not written)
+`);
+  if (session.timeAnchor) {
+    process.stdout.write(`Time window rounds ${session.timeAnchor.start.round}\u2013${session.timeAnchor.end.round}
+`);
+  }
+}
+function delay2(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 function projectDir(flags) {
-  return path5.resolve(typeof flags.dir === "string" ? flags.dir : process.cwd());
+  return path6.resolve(typeof flags.dir === "string" ? flags.dir : process.cwd());
 }
 function resolveIn(dir, file) {
-  return path5.resolve(dir, file);
+  return path6.resolve(dir, file);
 }
 function contextFrom(flags, cwd, file) {
-  const detected = detectContext(cwd, path5.resolve(file));
+  const detected = detectContext(cwd, path6.resolve(file));
   const requested = flags.environment === void 0 ? void 0 : String(flags.environment);
   if (requested === void 0) return detected;
   if (requested !== "git" && requested !== "overleaf-git" && requested !== "local") {
@@ -2749,19 +3184,19 @@ function contextFrom(flags, cwd, file) {
   return { ...detected, environment: requested };
 }
 function loadPolicy(cwd, override) {
-  const file = typeof override === "string" ? override : path5.join(cwd, ".zk-scribe", "policy.json");
-  if (!fs4.existsSync(file)) throw new Error(`Policy not found at ${file}. Run zk-scribe init.`);
+  const file = typeof override === "string" ? override : path6.join(cwd, ".zk-scribe", "policy.json");
+  if (!fs5.existsSync(file)) throw new Error(`Policy not found at ${file}. Run zk-scribe init.`);
   return readJson(file);
 }
 function loadSecret(cwd) {
-  const file = path5.join(cwd, ".zk-scribe", "private", "agent.seed");
-  if (!fs4.existsSync(file)) throw new Error(`Agent seed not found at ${file}. Run zk-scribe init.`);
-  return decodeSecretKey(fs4.readFileSync(file, "utf8").trim());
+  const file = path6.join(cwd, ".zk-scribe", "private", "agent.seed");
+  if (!fs5.existsSync(file)) throw new Error(`Agent seed not found at ${file}. Run zk-scribe init.`);
+  return decodeSecretKey(fs5.readFileSync(file, "utf8").trim());
 }
 function loadTrustedKey(cwd, override) {
   if (typeof override === "string") return override;
-  const file = path5.join(cwd, ".zk-scribe", "agent.public.json");
-  if (!fs4.existsSync(file)) throw new Error(`Trusted agent key not found at ${file}. Pass --agent-key.`);
+  const file = path6.join(cwd, ".zk-scribe", "agent.public.json");
+  if (!fs5.existsSync(file)) throw new Error(`Trusted agent key not found at ${file}. Pass --agent-key.`);
   const parsed = readJson(file);
   if (!parsed.publicKey) throw new Error("agent.public.json is missing publicKey.");
   return parsed.publicKey;
@@ -2775,11 +3210,11 @@ function required(flags, name) {
   return value;
 }
 function readJson(file) {
-  return JSON.parse(fs4.readFileSync(file, "utf8"));
+  return JSON.parse(fs5.readFileSync(file, "utf8"));
 }
 function writeJson(file, value) {
-  fs4.mkdirSync(path5.dirname(path5.resolve(file)), { recursive: true });
-  fs4.writeFileSync(file, `${JSON.stringify(value, null, 2)}
+  fs5.mkdirSync(path6.dirname(path6.resolve(file)), { recursive: true });
+  fs5.writeFileSync(file, `${JSON.stringify(value, null, 2)}
 `);
 }
 function parseArgs(argv) {
@@ -2802,10 +3237,10 @@ function parseArgs(argv) {
   }
   return { command, flags, positionals };
 }
-function fail(error) {
+function fail(error, code = 1) {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}
 `);
-  process.exit(1);
+  process.exit(code);
 }
 try {
   main(process.argv.slice(2));

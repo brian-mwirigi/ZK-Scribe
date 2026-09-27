@@ -1,9 +1,11 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { eventsFromTextChange, type TextChange } from "./document.ts";
 import { eventsFromEdit } from "./edits.ts";
 import { cliArgs } from "../entry.ts";
 import type { KeyEvent, SessionLog } from "../pop/session.ts";
+import type { TimeAnchor } from "../time/drand.ts";
 
 const TEXT = new Set([".md", ".markdown", ".tex", ".txt"]);
 const SKIP = new Set([".git", ".zk-scribe", "node_modules", "output", "build", "dist"]);
@@ -68,11 +70,13 @@ export function scanOnce(dir: string, now = Date.now()): number {
   if (current && current.events.length > 0) t = Math.max(t, current.events[current.events.length - 1].t);
   const next: Record<string, string> = {};
   const events: KeyEvent[] = [];
+  const captured = current?.source === "editor" || current?.source === "overleaf" || current?.source === "record";
   for (const file of listManuscripts(dir)) {
     const relative = path.relative(dir, file).replaceAll("\\", "/");
     const text = fs.readFileSync(file, "utf8");
     if (text.length > MAX_CHARS) continue;
     next[relative] = text;
+    if (captured) continue;
     const before = state.files[relative];
     if (before === undefined) continue;
     const delta = eventsFromEdit(before, text, t);
@@ -81,10 +85,11 @@ export function scanOnce(dir: string, now = Date.now()): number {
     t += 1;
   }
   writeState(dir, { files: next });
-  if (events.length === 0) return 0;
+  if (captured || events.length === 0) return 0;
   const session: SessionLog = current ?? {
     sessionId: `watch-${now.toString(16)}`,
     startedAt: new Date(now).toISOString(),
+    source: "watch",
     events: [],
   };
   session.events.push(...events);
@@ -103,6 +108,69 @@ export function watcherAlive(dir: string): boolean {
   } catch {
     return false;
   }
+}
+
+// Remember the editor buffer so a later save is not recorded again as one bulk edit.
+export function recordEditorChange(
+  dir: string,
+  relativePath: string,
+  changes: TextChange[],
+  text: string,
+  now = Date.now(),
+): number {
+  const relative = relativePath.replaceAll("\\", "/");
+  if (!isManuscriptRelative(dir, relative) || text.length > MAX_CHARS) return 0;
+  const state = readState(dir);
+  state.files[relative] = text;
+  writeState(dir, state);
+  const current = readSession(dir);
+  const started = current ? Date.parse(current.startedAt) : now;
+  const origin = Number.isFinite(started) ? started : now;
+  let t = Math.max(0, now - origin);
+  if (current && current.events.length > 0) t = Math.max(t, current.events[current.events.length - 1].t);
+  const events = changes.flatMap((change) => eventsFromTextChange(change, t));
+  if (events.length === 0) return 0;
+  const session: SessionLog = current ?? {
+    sessionId: `editor-${now.toString(16)}`,
+    startedAt: new Date(origin).toISOString(),
+    source: "editor",
+    events: [],
+  };
+  session.source = session.source === "overleaf" || session.source === "record" ? session.source : "editor";
+  session.events.push(...events);
+  writeSession(dir, session);
+  return events.length;
+}
+
+// Lengths from the Overleaf bridge. The manuscript text is not on this machine.
+export function appendRemoteEdits(dir: string, changes: TextChange[], now = Date.now()): number {
+  const current = readSession(dir);
+  const fresh = !current || current.source === "watch";
+  const started = fresh ? now : Date.parse(current.startedAt);
+  const origin = Number.isFinite(started) ? started : now;
+  let t = Math.max(0, now - origin);
+  if (!fresh && current.events.length > 0) t = Math.max(t, current.events[current.events.length - 1].t);
+  const events = changes.flatMap((change) => eventsFromTextChange(change, t));
+  if (events.length === 0) return 0;
+  const session: SessionLog = fresh
+    ? {
+        sessionId: `overleaf-${now.toString(16)}`,
+        startedAt: new Date(origin).toISOString(),
+        source: "overleaf",
+        events: [],
+      }
+    : current;
+  session.source = "overleaf";
+  session.events.push(...events);
+  writeSession(dir, session);
+  return events.length;
+}
+
+export function writeSessionAnchor(dir: string, anchor: TimeAnchor): void {
+  const current = readSession(dir);
+  if (!current) return;
+  current.timeAnchor = { ...anchor, startedAt: current.startedAt };
+  writeSession(dir, current);
 }
 
 export function startWatcher(dir: string): boolean {

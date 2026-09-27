@@ -1,4 +1,8 @@
+import type { TimeAnchor } from "../time/drand.ts";
+
 export type KeyOp = "insert" | "delete" | "navigate" | "paste";
+
+export type SessionSource = "record" | "editor" | "overleaf" | "watch";
 
 export type KeyEvent = {
   t: number;
@@ -11,6 +15,8 @@ export type SessionLog = {
   sessionId: string;
   startedAt: string;
   events: KeyEvent[];
+  source?: SessionSource;
+  timeAnchor?: TimeAnchor;
 };
 
 const OPS = new Set<KeyOp>(["insert", "delete", "navigate", "paste"]);

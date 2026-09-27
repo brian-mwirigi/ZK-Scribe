@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ZK-Scribe for Overleaf</title>
+    <style>
+      body { font: 16px/1.4 sans-serif; margin: 24px; max-width: 36rem; }
+      label { display: block; margin-top: 16px; }
+      input { width: 100%; margin-top: 4px; font: inherit; }
+      button { margin-top: 16px; font: inherit; }
+      p { color: #333; }
+    </style>
+  </head>
+  <body>
+    <h1>ZK-Scribe for Overleaf</h1>
+    <p>Run <code>zk-scribe overleaf</code> in the cloned project. Paste the port and token it prints. The extension sends edit lengths only.</p>
+    <label>Port <input id="port" autocomplete="off" /></label>
+    <label>Token <input id="token" autocomplete="off" /></label>
+    <button id="save" type="button">Save</button>
+    <p id="status"></p>
+    <script src="options.js"></script>
+  </body>
+</html>

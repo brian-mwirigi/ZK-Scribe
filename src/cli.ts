@@ -2,9 +2,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
-import { sha256Hex, utf8 } from "./canon.ts";
+import { fileURLToPath } from "node:url";
+import { canonicalHash, sha256Hex, utf8 } from "./canon.ts";
 import { rangeBenchmark } from "./crypto/benchmark.ts";
 import { applyTextDelta, eventFromKey, type KeyInfo } from "./capture/keys.ts";
+import { startOverleafBridge } from "./capture/overleaf.ts";
 import { CREDIT_ROLES } from "./credit/taxonomy.ts";
 import { suggestRole } from "./credit/suggest.ts";
 import { defaultPolicy, policyHash, type Policy } from "./cva/policy.ts";
@@ -33,6 +35,7 @@ import { sessionStats } from "./pop/stats.ts";
 import type { SessionLog } from "./pop/session.ts";
 import { synthesizeSession } from "./pop/synthesize.ts";
 import { scanOnce, startWatcher, watchLabel } from "./capture/watch.ts";
+import { ensureAnchor, fetchLatest, needsAnotherRound, QUICKNET, windowProblem, type TimeAnchor, type TimeRound } from "./time/drand.ts";
 import { ensureLocalIgnore, installCommitHook, runCommitHook } from "./git/hook.ts";
 import { statusCounts, statusText } from "./status.ts";
 import { VERSION } from "./version.ts";
@@ -47,6 +50,7 @@ Usage:
   zk-scribe status [--dir .]
   zk-scribe example --kind composition|transcription|automated|paste --out session.json
   zk-scribe record --out session.json
+  zk-scribe overleaf [--dir .]
   zk-scribe attest --file manuscript.md [--role <credit-role>] [--session session.json] [--assert "claim"] [--author-seed author.seed] [--grant grant.json] [--out attestation.json]
   zk-scribe verify <attestation.json> [--require process|process-proven] [--require-author] [--require-grant] [--grant grant.json] [--agent-key hex] [--policy policy.json]
   A .zk-scribe/revoked.json list, when present, refuses those agent keys.
@@ -84,7 +88,8 @@ function main(argv: string[]): void {
   if (command === "hook") return runCommitHook(path.resolve(String(flags.dir ?? ".")));
   if (command === "example") return example(flags);
   if (command === "record") return void record(String(flags.out ?? "session.json")).catch(fail);
-  if (command === "attest") return attestCommand(flags);
+  if (command === "overleaf") return void overleafCommand(flags).catch(fail);
+  if (command === "attest") return void attestCommand(flags).catch((error) => fail(error, 2));
   if (command === "verify") return verifyCommand(flags, positionals);
   if (command === "audit") return auditCommand(flags);
   if (command === "export") return exportCommand(flags, positionals);
@@ -183,7 +188,7 @@ function example(flags: Flags): void {
   process.stdout.write(`Wrote ${out}\n`);
 }
 
-function attestCommand(flags: Flags): void {
+async function attestCommand(flags: Flags): Promise<void> {
   const dir = projectDir(flags);
   const file = resolveIn(dir, required(flags, "file"));
   const role = roleFor(dir, flags);
@@ -192,7 +197,15 @@ function attestCommand(flags: Flags): void {
   const secret = loadSecret(dir);
   const contentHash = sha256Hex(fs.readFileSync(file));
   const assertion = flags.assert === undefined ? undefined : String(flags.assert);
-  const session = flags.session ? readJson<SessionLog>(resolveIn(dir, String(flags.session))) : undefined;
+  const sessionFile = flags.session ? resolveIn(dir, String(flags.session)) : "";
+  let session = sessionFile ? readJson<SessionLog>(sessionFile) : undefined;
+  if (session && (session.source === "record" || session.source === "overleaf" || session.source === "editor")) {
+    const sealed = await ensureAnchor(session);
+    if (canonicalHash(sealed.timeAnchor ?? null) !== canonicalHash(session.timeAnchor ?? null)) {
+      writeJson(sessionFile, sealed);
+    }
+    session = sealed;
+  }
   const context = contextFrom(flags, dir, file);
   const grantHash = applyGovernance(dir, flags, policy, assertedAction(flags), contentHash);
   const { attestation, witness } = attest({
@@ -545,17 +558,46 @@ function credit(): void {
   }
 }
 
-function record(out: string): Promise<void> {
-  if (!process.stdin.isTTY || typeof process.stdin.setRawMode !== "function") {
-    return Promise.reject(new Error("record needs an interactive terminal."));
+async function overleafCommand(flags: Flags): Promise<void> {
+  const dir = projectDir(flags);
+  if (!fs.existsSync(path.join(dir, ".zk-scribe", "config.json"))) {
+    throw new Error("Run zk-scribe init in this repository.");
   }
-  return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin });
-    readline.emitKeypressEvents(process.stdin, rl);
-    process.stdin.setRawMode(true);
-    const started = Date.now();
-    const events: SessionLog["events"] = [];
-    let text = "";
+  const bridge = await startOverleafBridge(dir);
+  const folder = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "editors", "overleaf");
+  process.stdout.write(`Overleaf bridge listening on 127.0.0.1:${bridge.port}\n`);
+  process.stdout.write(`Token ${bridge.token}\n`);
+  process.stdout.write(`Load the unpacked extension from ${folder}\n`);
+  process.stdout.write("Paste the port and token into the extension options. The bridge stores edit lengths only.\n");
+  process.stdout.write("Ctrl+C stops the bridge.\n");
+  await new Promise<void>((resolve) => {
+    const stop = () => {
+      void bridge.close().then(() => resolve());
+    };
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
+  });
+}
+
+async function record(out: string): Promise<void> {
+  if (!process.stdin.isTTY || typeof process.stdin.setRawMode !== "function") {
+    throw new Error("record needs an interactive terminal.");
+  }
+  let beaconStart: TimeRound | null = null;
+  try {
+    beaconStart = await fetchLatest();
+  } catch {
+    beaconStart = null;
+  }
+  const started = Date.now();
+  const startedAt = new Date(started).toISOString();
+  const events: SessionLog["events"] = [];
+  let text = "";
+  const rl = readline.createInterface({ input: process.stdin });
+  readline.emitKeypressEvents(process.stdin, rl);
+  process.stdin.setRawMode(true);
+  process.stdout.write("Timing keystrokes. Typed text stays on screen and is not saved.\nCtrl+D writes the timing log. Ctrl+C discards it.\n");
+  const finished = await new Promise<"save" | "discard">((resolve) => {
     const cleanup = () => {
       process.stdin.setRawMode(false);
       process.stdin.off("keypress", onKey);
@@ -565,22 +607,12 @@ function record(out: string): Promise<void> {
       const step = eventFromKey({ ...key, sequence: key.sequence || str }, Date.now() - started);
       if (step.kind === "abort") {
         cleanup();
-        process.stdout.write("\nDiscarded. Nothing was written.\n");
-        process.exitCode = 1;
-        resolve();
+        resolve("discard");
         return;
       }
       if (step.kind === "finish") {
         cleanup();
-        const session: SessionLog = {
-          sessionId: `rec-${started.toString(16)}`,
-          startedAt: new Date(started).toISOString(),
-          events,
-        };
-        writeJson(out, session);
-        process.stdout.write(`\nSaved ${events.length} timing events to ${out}\n`);
-        process.stdout.write(`Local buffer hash ${sha256Hex(utf8(text))} (the text was not written)\n`);
-        resolve();
+        resolve("save");
         return;
       }
       if (step.kind === "event") {
@@ -591,8 +623,48 @@ function record(out: string): Promise<void> {
       }
     };
     process.stdin.on("keypress", onKey);
-    process.stdout.write("Timing keystrokes. Typed text stays on screen and is not saved.\nCtrl+D writes the timing log. Ctrl+C discards it.\n");
   });
+  if (finished === "discard") {
+    process.stdout.write("\nDiscarded. Nothing was written.\n");
+    process.exitCode = 1;
+    return;
+  }
+  const session: SessionLog = {
+    sessionId: `rec-${started.toString(16)}`,
+    startedAt,
+    source: "record",
+    events,
+  };
+  const duration = events.length === 0 ? 0 : events[events.length - 1].t - events[0].t;
+  if (!beaconStart) {
+    process.stdout.write("Time beacon was unavailable. The log was saved without a wall-clock window.\n");
+  } else {
+    try {
+      let end = await fetchLatest();
+      const deadline = Date.now() + QUICKNET.period * 1000 * 3 + 500;
+      let anchor: TimeAnchor = { scheme: "drand-quicknet-v1", startedAt, start: beaconStart, end };
+      while (needsAnotherRound(windowProblem(anchor, duration)) && Date.now() < deadline) {
+        await delay(QUICKNET.period * 1000 + 200);
+        end = await fetchLatest();
+        anchor = { scheme: "drand-quicknet-v1", startedAt, start: beaconStart, end };
+      }
+      const problem = windowProblem(anchor, duration);
+      if (problem) process.stdout.write(`${problem} The log was saved without a time beacon.\n`);
+      else session.timeAnchor = anchor;
+    } catch {
+      process.stdout.write("Time beacon was unavailable. The log was saved without a wall-clock window.\n");
+    }
+  }
+  writeJson(out, session);
+  process.stdout.write(`\nSaved ${events.length} timing events to ${out}\n`);
+  process.stdout.write(`Local buffer hash ${sha256Hex(utf8(text))} (the text was not written)\n`);
+  if (session.timeAnchor) {
+    process.stdout.write(`Time window rounds ${session.timeAnchor.start.round}–${session.timeAnchor.end.round}\n`);
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function projectDir(flags: Flags): string {
@@ -674,9 +746,9 @@ function parseArgs(argv: string[]): { command: string; flags: Flags; positionals
   return { command, flags, positionals };
 }
 
-function fail(error: unknown): never {
+function fail(error: unknown, code = 1): never {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-  process.exit(1);
+  process.exit(code);
 }
 
 try {

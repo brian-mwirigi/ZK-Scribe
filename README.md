@@ -25,11 +25,11 @@ This repository is the first slice of that system. The proof system identifiers 
 | --- | --- | --- |
 | Commitments | Pedersen on secp256k1 | same role |
 | Range proofs | Bit decomposition and OR-proofs (`sigma-bit-or-v1`) | Bulletproofs, then a Groth16 circuit |
-| Process order | Hash chain (`hash-chain-v1`) | A sequential work / delay function, so a log cannot be synthesized after the fact |
+| Process order | Hash chain (`hash-chain-v1`). A capture can bind that head to a drand quicknet window | A delay function, so a log cannot be filled in after the window opens |
 | Agent authorization | Ed25519 signature over agent, action, policy, and context (`ed25519-cva-v1`) | A zero-knowledge authorization relation |
 | Feature correctness | Local audit against the witness file | A circuit that recomputes the features from the chained events |
 
-A person who controls the agent key can still invent a session log whose features sit in the composition region. The hash chain binds order. It does not yet bind the log to wall-clock time. Hiding the features from the publisher is implemented. Proving the agent computed them honestly is the next proof.
+When `record` or the Overleaf bridge can reach the League of Entropy quicknet, the attestation carries those two public rounds. `verify` checks the beacon signatures locally and checks that the session duration fits between them. The hash-chain head is computed from the events and those rounds, so the published head is tied to that window. A person who controls the agent key can still invent events inside the window. The chain is not a delay function, and no circuit recomputes the features from the events. Hosted publisher checks stay outside this repository.
 
 The composition region is a conservative box over pause bands, revision, and speed. It is not a trained biometric model, and it is not a claim about the accuracy figures in the research literature. Sessions that look like steady transcription, metronomic input, or a bulk paste do not receive a composition binding.
 
@@ -50,7 +50,7 @@ zk-scribe status
 
 `status` is the first thing to read after a few commits. A line such as `3 sessions attested, ledger building` means the hook is writing the ledger. The next line says how many of those are `process-proven` and how many were refused. A refusal is not a process proof.
 
-A file save is one edit of the length that actually changed. ZK-Scribe does not split that save into fake keystrokes. Composition still requires the timing bounds, so a bulk save is refused. A session captured with `record`, or any log that already meets the bounds, is what the hook certifies.
+A file save is one edit of the length that actually changed. ZK-Scribe does not split that save into fake keystrokes. Composition still requires the timing bounds, so a bulk save is refused. A session captured with `record`, the VS Code extension, or any log that already meets the bounds, is what the hook certifies.
 
 From a checkout of this repository, the same commands are available with `npm install` and `npm run zk-scribe --`.
 
@@ -74,7 +74,11 @@ npm run zk-scribe -- export attestation.json --format jats
 
 `attest` also writes `attestation.witness.json`. That file opens the commitments. Keep it local. The default policy denies exporting it.
 
-`record` times an interactive terminal session. Typed characters are echoed and then discarded; the saved log stores operation, length, timestamp, and a boundary flag. Ctrl+D saves the log. Ctrl+C discards it. Editor hooks for Overleaf and local markdown come after this log format.
+`record` times an interactive terminal session. Typed characters are echoed and then discarded; the saved log stores operation, length, timestamp, and a boundary flag. Ctrl+D saves the log. Ctrl+C discards it.
+
+The VS Code extension in [editors/vscode](editors/vscode) records each document change the same way. Install that folder after `init`. A character typed in the editor is one insert. A paste stays one insert of its real length.
+
+On Overleaf, clone the project's Git remote, run `init`, then `zk-scribe overleaf`. The browser extension in [editors/overleaf](editors/overleaf) sends each source-editor change as a length. The local bridge stamps the time and stores the same operation log. The commit hook attests that session and labels the environment `overleaf-git` when the remote URL contains `overleaf`. A later Git sync is not appended as another edit. `record` remains available for a terminal session.
 
 ## Commands
 

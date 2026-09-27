@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "ZK-Scribe for Overleaf",
+  "version": "0.3.0",
+  "description": "Sends each Overleaf edit's length to a local ZK-Scribe bridge. The manuscript text stays in the editor.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://www.overleaf.com/*",
+    "https://overleaf.com/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "ZK-Scribe for Overleaf"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.overleaf.com/project/*", "https://overleaf.com/project/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ]
+}

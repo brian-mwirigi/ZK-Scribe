@@ -9,6 +9,7 @@ ZK-Scribe is for an author who wants a publisher to check a human writing proces
 - For a process binding, each committed feature lies in the composition region.
 - The role binding matches the feasibility of that CRediT role. Writing roles are `process-proven`. Typed artifacts are `typed-artifact`. Offline roles are `signed-assertion` only.
 - The statement, including the manuscript hash, execution context, and hash-chain head, is covered by the signature.
+- When the attestation includes a time anchor, both quicknet signatures verify under the pinned chain key, the published duration fits between those rounds, and the signature covers the anchor together with the hash-chain head. `verify` does this locally. It does not call a ZK-Scribe server.
 - The published file does not contain the session events or the commitment openings. `audit` is the local check that those openings match the log.
 
 ## Publisher checks that do not hold yet
@@ -29,7 +30,7 @@ A gift-authorship claim has no process binding when that person's key never sign
 
 ## People this does not yet constrain
 
-The holder of the seed can build a session whose statistics sit in the composition box, sign it, and pass `verify`. Closing that gap requires a capture path the author cannot cheaply rewrite, plus a delay function on the event chain, plus a circuit that ties the features to that chain.
+The holder of the seed can build a session whose statistics sit in the composition box, sign it, and pass `verify`. A time anchor, when the capture attached one, forces that session's duration to fit between two public rounds. It does not stop the key holder from choosing the events inside that window. Closing the rest of the gap requires a delay function on the event chain and a circuit that ties the features to that chain. Hosted publisher checks stay outside this repository.
 
 ## Privacy
 

@@ -1,0 +1,16 @@
+{
+  "name": "zk-scribe-vscode",
+  "displayName": "ZK-Scribe",
+  "description": "Record manuscript edit timing. The text stays in the editor.",
+  "version": "0.3.0",
+  "publisher": "brian-mwirigi",
+  "license": "Apache-2.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "extensionKind": ["workspace"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./dist/extension.js",
+  "contributes": {}
+}

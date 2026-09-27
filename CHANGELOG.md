@@ -7,6 +7,9 @@ The attestation statement version stays `zk-scribe/0.1.0`.
 - Install with one script. `zk-scribe init` in a manuscript repository watches the working directory and installs a commit hook.
 - Commits attest the session that was observed. A save is recorded as one edit. The agent does not invent keystrokes.
 - `zk-scribe status` shows how many sessions are on the ledger.
+- The VS Code extension records each document change as an operation, a time, and a length.
+- The Overleaf extension sends each source-editor change to `zk-scribe overleaf` on `127.0.0.1`. The bridge stores the length and stamps the time. The commit hook attests that session.
+- `record` and the Overleaf bridge attach a drand quicknet window when the public beacon is reachable. `verify` checks those signatures locally. The key holder can still choose events inside the window.
 
 ## 0.2.0
 

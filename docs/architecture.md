@@ -18,6 +18,8 @@ flowchart LR
 
 A session is JSON. Each event is a timestamp in milliseconds from the start, an operation (`insert`, `delete`, `navigate`, `paste`), a length, and an optional boundary flag. The boundary flag marks a clause or sentence edge. The event does not store the character.
 
+Four captures write that log. `record` reads the terminal. The VS Code extension reads each document change. The Overleaf extension sends each source-editor change to a bridge on `127.0.0.1`, which stores the length and stamps the time. The background watcher reads a file save as one edit. None of them split a change into keystrokes the editor did not report. The watcher keeps a private copy of the file text so it can see the next save. A session captured by the terminal, VS Code, or Overleaf is left as it is when the file later changes on disk. The watcher updates its snapshot and does not append that save.
+
 Planning pauses are gaps from 1,000 to 5,000 milliseconds. A boundary pause is one of those gaps next to a boundary event. Peak rate is the densest two-second window of inserted characters. Revision is delete characters over insert plus delete characters, in parts per thousand.
 
 `src/pop/regions.ts` is the acceptance region for three labels: `composition`, `transcription`, and `automated`. The boxes are disjoint. Anything outside them is `indeterminate`. A bulk insert of 15 or more characters cannot be labeled composition.
@@ -41,7 +43,7 @@ state_i = SHA-256(state_{i-1} || digest(event_i))
 
 The head is public. The events are not. `audit` recomputes the head from the local session and checks that the witness openings match both the extracted features and the published commitments.
 
-A hash chain can be rebuilt as fast as it can be hashed. It stops a third party from reordering a published proof. It does not stop the holder of the agent key from creating a fresh chain over invented timestamps. That is the gap a verifiable delay function is there to close.
+A hash chain can be rebuilt as fast as it can be hashed. It stops a third party from reordering a published proof. When a session carries a drand quicknet anchor, the chain label also includes those two round signatures, and `verify` checks that the public duration fits between the rounds. The holder of the agent key can still invent the events inside that window and hash them in one pass. A delay function would be what forces the hashing to take the time the timestamps claim.
 
 ## Agent authorization
 

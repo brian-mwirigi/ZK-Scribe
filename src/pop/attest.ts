@@ -27,6 +27,7 @@ import { extract, type Extraction } from "./extract.ts";
 import { REGIONS, type Label } from "./regions.ts";
 import type { SessionLog } from "./session.ts";
 import { sequentialWorkHead } from "./swf.ts";
+import { chainDomain, windowProblem, type TimeAnchor } from "../time/drand.ts";
 
 export type Binding = "process-proven" | "typed-artifact" | "signed-assertion" | "unsupported";
 
@@ -75,6 +76,7 @@ export type Attestation = {
   };
   author?: AuthorEndorsement;
   grantHash?: string;
+  timeAnchor?: TimeAnchor;
 };
 
 export type Witness = {
@@ -158,8 +160,19 @@ export function attest(input: AttestInput): { attestation: Attestation; witness:
       throw new Error(`${role.name} cannot be process-attested. Pass --assert with the claim text.`);
     }
     extraction = extract(input.session);
+    if (input.session.timeAnchor) {
+      if (input.session.timeAnchor.startedAt !== input.session.startedAt) {
+        throw new Error("Time beacon does not match the session start.");
+      }
+      const problem = windowProblem(input.session.timeAnchor, extraction.durationMs);
+      if (problem) throw new Error(problem);
+    }
     label = extraction.label;
-    swfHead = sequentialWorkHead(input.session, input.contentHash);
+    swfHead = sequentialWorkHead(
+      input.session,
+      input.contentHash,
+      input.session.timeAnchor ? chainDomain(input.session.timeAnchor) : undefined,
+    );
     sessionId = input.session.sessionId;
     counts = {
       eventCount: extraction.eventCount,
@@ -226,6 +239,7 @@ export function attest(input: AttestInput): { attestation: Attestation; witness:
   if (grantHash !== undefined && !/^[0-9a-f]{64}$/.test(grantHash)) {
     throw new Error("grantHash must be a sha256 hex digest.");
   }
+  const timeAnchor = input.session?.timeAnchor;
   const payload = signedPayload({
     action,
     agentPublicKey,
@@ -235,6 +249,7 @@ export function attest(input: AttestInput): { attestation: Attestation; witness:
     rangeProofs,
     author,
     grantHash,
+    timeAnchor,
   });
   const attestation: Attestation = {
     version: "zk-scribe/0.1.0",
@@ -249,6 +264,7 @@ export function attest(input: AttestInput): { attestation: Attestation; witness:
     },
     ...(author ? { author } : {}),
     ...(grantHash ? { grantHash } : {}),
+    ...(timeAnchor ? { timeAnchor } : {}),
   };
   const witness: Witness | null = extraction
     ? {
@@ -305,6 +321,7 @@ export function verify(attestation: Attestation, options: VerifyOptions): Verify
       rangeProofs: attestation.rangeProofs,
       author: attestation.author,
       grantHash: attestation.grantHash,
+      timeAnchor: attestation.timeAnchor,
     });
     signatureValid = verifySignature(
       decodeSignature(attestation.cva.signature),
@@ -312,6 +329,10 @@ export function verify(attestation: Attestation, options: VerifyOptions): Verify
       decodePublicKey(attestation.cva.agentPublicKey),
     );
     if (!signatureValid) reasons.push("Agent signature is invalid.");
+    if (attestation.timeAnchor) {
+      const problem = windowProblem(attestation.timeAnchor, attestation.statement.counts.durationMs);
+      if (problem) reasons.push(problem);
+    }
     if (attestation.author && !authorEndorsementValid(statementHash, attestation.author)) {
       reasons.push("Author endorsement does not match the statement.");
     }
@@ -361,8 +382,16 @@ export function audit(attestation: Attestation, session: SessionLog, witness: Wi
   if (session.sessionId !== attestation.statement.sessionId || witness.sessionId !== session.sessionId) {
     reasons.push("Session id does not match the attestation.");
   }
-  if (sequentialWorkHead(session, attestation.statement.contentHash) !== attestation.statement.swfHead) {
+  const domain = session.timeAnchor ? chainDomain(session.timeAnchor) : undefined;
+  if (sequentialWorkHead(session, attestation.statement.contentHash, domain) !== attestation.statement.swfHead) {
     reasons.push("Sequential work head does not match the session and content hash.");
+  }
+  if (canonicalHash(session.timeAnchor ?? null) !== canonicalHash(attestation.timeAnchor ?? null)) {
+    reasons.push("Time beacon does not match the session.");
+  }
+  if (session.timeAnchor) {
+    const problem = windowProblem(session.timeAnchor, extraction.durationMs);
+    if (problem) reasons.push(problem);
   }
   if (extraction.label !== attestation.statement.label) reasons.push("Recomputed label does not match.");
   const counts = attestation.statement.counts;
@@ -502,6 +531,7 @@ function signedPayload(body: {
   rangeProofs: Attestation["rangeProofs"];
   author?: AuthorEndorsement;
   grantHash?: string;
+  timeAnchor?: TimeAnchor;
 }): string {
   const payload: Record<string, unknown> = {
     action: body.action,
@@ -513,6 +543,7 @@ function signedPayload(body: {
   };
   if (body.author) payload.author = body.author;
   if (body.grantHash) payload.grantHash = body.grantHash;
+  if (body.timeAnchor) payload.timeAnchor = body.timeAnchor;
   return canonicalHash(payload);
 }
 

@@ -12,6 +12,7 @@
   "files": [
     "bin",
     "dist",
+    "editors",
     "NOTICE"
   ],
   "publishConfig": {
@@ -21,6 +22,7 @@
     "test": "node scripts/run-tests.mjs",
     "typecheck": "tsc --noEmit",
     "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/cli.js",
+    "build:vscode": "esbuild editors/vscode/src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=editors/vscode/dist/extension.js",
     "zk-scribe": "node --experimental-strip-types src/cli.ts"
   },
   "dependencies": {
